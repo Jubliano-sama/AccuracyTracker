@@ -88,14 +88,17 @@ class ShotAccuracyApp:
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
         # Probability Labels
-        self.prob_usual_label = tk.Label(self.prob_frame, text="Usual Probability: N/A")
+        self.prob_usual_label = tk.Label(self.prob_frame, text="Usual Probability (Normal): N/A")
         self.prob_usual_label.grid(row=2, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability: N/A")
-        self.prob_lower_label.grid(row=3, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_kde_label = tk.Label(self.prob_frame, text="Usual Probability (KDE): N/A")
+        self.prob_kde_label.grid(row=3, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability: N/A")
-        self.prob_higher_label.grid(row=4, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Normal): N/A")
+        self.prob_lower_label.grid(row=4, column=0, columnspan=2, sticky='w', padx=10)
+
+        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (Normal): N/A")
+        self.prob_higher_label.grid(row=5, column=0, columnspan=2, sticky='w', padx=10)
 
         # Bind variable changes for live updates
         self.trials_var.trace_add('write', self.on_prob_input_change)
@@ -212,13 +215,13 @@ class ShotAccuracyApp:
             self.std_label.config(text=f"Standard Deviation: {std_dev:.2f} cm" if std_dev is not None else "Standard Deviation: N/A")
 
             # Calculate standard error of standard deviation
-            std_error = std_dev / sqrt(2 * (len(distances) - 1)) if std_dev is not None and len(distances) > 1 else None
+            std_error = std_dev / sqrt(2 * (len(distances) - 1)) if std_dev is not None else None
             self.std_error = std_error
             self.error_label.config(text=f"Error in Std Dev: {std_error:.2f} cm" if std_error is not None else "Error in Std Dev: N/A")
         else:
             self.std_dev = None
             self.std_error = None
-            self.std_label.config(text=f"Standard Deviation: {std_dev:.2f} cm" if len(distances) > 1 else "Standard Deviation: N/A (insufficient data)")
+            self.std_label.config(text="Standard Deviation: N/A (insufficient data)")
             self.error_label.config(text="Error in Std Dev: N/A")
 
         # Store average coordinates
@@ -228,18 +231,20 @@ class ShotAccuracyApp:
 
     def calculate_probabilities(self):
         if not self.distances or not self.avg_coords:
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+            self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
+            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
 
         # Get user inputs
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
         if trials_str == "" or hits_str == "":
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+            self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
+            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
         try:
             trials = int(trials_str)
@@ -247,40 +252,68 @@ class ShotAccuracyApp:
             if trials <= 0 or hits < 0 or hits > trials:
                 raise ValueError
         except ValueError:
-            self.prob_usual_label.config(text="Usual Probability: Invalid Input")
-            self.prob_lower_label.config(text="Lower Probability: Invalid Input")
-            self.prob_higher_label.config(text="Higher Probability: Invalid Input")
+            self.prob_usual_label.config(text="Usual Probability (Normal): Invalid Input")
+            self.prob_kde_label.config(text="Usual Probability (KDE): Invalid Input")
+            self.prob_lower_label.config(text="Lower Probability (Normal): Invalid Input")
+            self.prob_higher_label.config(text="Higher Probability (Normal): Invalid Input")
             return
 
         if self.std_dev is None or self.std_error is None:
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+            self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
+            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
+
+        # --- Normal Distribution-based Probability Calculation ---
 
         # Probability within 15 cm using the normal distribution
         mean_dist = mean(self.distances)  # mean of distances from the center
         usual_std_dev = self.std_dev
 
         # Usual probability (within 15 cm, using the CDF of the normal distribution)
-        prob_usual = norm.cdf(15, loc=mean_dist, scale=usual_std_dev)
+        prob_usual = norm.cdf(mean_dist + 15, loc=mean_dist, scale=usual_std_dev) - norm.cdf(mean_dist - 15, loc=mean_dist, scale=usual_std_dev)
 
         # Lower and upper bounds based on the standard error
         lower_std_dev = max(usual_std_dev - self.std_error, 0)  # Ensure std_dev doesn't go below zero
         upper_std_dev = usual_std_dev + self.std_error
 
-        prob_higher = norm.cdf(15, loc=mean_dist, scale=lower_std_dev)
-        prob_lower = norm.cdf(15, loc=mean_dist, scale=upper_std_dev)
+        prob_higher = norm.cdf(mean_dist + 15, loc=mean_dist, scale=lower_std_dev) - norm.cdf(mean_dist - 15, loc=mean_dist, scale=lower_std_dev)
+        prob_lower = norm.cdf(mean_dist + 15, loc=mean_dist, scale=upper_std_dev) - norm.cdf(mean_dist - 15, loc=mean_dist, scale=upper_std_dev)
 
         # Convert probabilities into binomial form (since we are calculating for trials and hits)
         prob_usual_binom = 1 - binom.cdf(hits - 1, trials, prob_usual)
         prob_lower_binom = 1 - binom.cdf(hits - 1, trials, prob_lower)
         prob_higher_binom = 1 - binom.cdf(hits - 1, trials, prob_higher)
 
-        # Update labels
-        self.prob_usual_label.config(text=f"Usual Probability: {prob_usual_binom * 100:.2f}%")
-        self.prob_lower_label.config(text=f"Lower Probability: {prob_lower_binom * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability: {prob_higher_binom * 100:.2f}%")
+        # --- KDE-based Probability Calculation ---
+
+        if len(self.distances) >= 2:
+            from scipy.stats import gaussian_kde
+
+            # Fit a KDE to the distances
+            kde = gaussian_kde(self.distances, bw_method='scott')
+
+            # Calculate probability within 15 cm by integrating the KDE
+            x = np.linspace(0, 30, 1000)  # 0 to 30 cm range for integration
+            y = kde(x)
+
+            # Find cumulative density for distances within 15 cm
+            prob_within_15_cm = np.trapz(y[x <= 15], x[x <= 15])
+
+            # Convert this probability into binomial form for the number of trials and hits
+            prob_kde_binom = 1 - binom.cdf(hits - 1, trials, prob_within_15_cm)
+
+            # Update labels with both metrics (Normal and KDE)
+            self.prob_usual_label.config(text=f"Usual Probability (Normal): {prob_usual_binom * 100:.2f}%")
+            self.prob_kde_label.config(text=f"Usual Probability (KDE): {prob_kde_binom * 100:.2f}%")
+            self.prob_lower_label.config(text=f"Lower Probability (Normal): {prob_lower_binom * 100:.2f}%")
+            self.prob_higher_label.config(text=f"Higher Probability (Normal): {prob_higher_binom * 100:.2f}%")
+        else:
+            self.prob_usual_label.config(text="Usual Probability (Normal): N/A (insufficient data)")
+            self.prob_kde_label.config(text="Usual Probability (KDE): N/A (insufficient data)")
+            self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
 
 
     def export_to_excel(self):
@@ -363,7 +396,7 @@ class ShotAccuracyApp:
         self.ax_density.set_title('Distance to Center Density')
         self.ax_density.set_xlabel('Distance to Center (cm)')
         self.ax_density.set_ylabel('Density')
-        self.ax_density.set_xlim(0, 30)
+        self.ax_density.set_xlim(-10, 30)
         self.ax_density.grid(True)
         self.fig_density.tight_layout()
         self.canvas_density.draw()
