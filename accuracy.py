@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from math import sqrt
 from statistics import mean, stdev
-from scipy.stats import binom
+from scipy.stats import binom, norm
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -224,8 +224,10 @@ class ShotAccuracyApp:
         # Store average coordinates
         self.avg_coords = (avg_x, avg_y)
 
+    from scipy.stats import norm
+
     def calculate_probabilities(self):
-        if not self.accuracy or self.total_shots == 0:
+        if not self.distances or not self.avg_coords:
             self.prob_usual_label.config(text="Usual Probability: N/A")
             self.prob_lower_label.config(text="Lower Probability: N/A")
             self.prob_higher_label.config(text="Higher Probability: N/A")
@@ -250,32 +252,36 @@ class ShotAccuracyApp:
             self.prob_higher_label.config(text="Higher Probability: Invalid Input")
             return
 
-        # Calculate probability based on accuracy
-        p = self.accuracy / self.total_shots  # Probability of a single hit within radius
-
-        # Usual probability
-        prob_usual = 1 - binom.cdf(hits -1, trials, p)
-
-        # Calculate lower and higher probabilities using error in std dev
-        if self.std_error is not None and self.avg_coords:
-            # Adjust probability based on error
-            # This is a simplistic approach; for more accurate uncertainty, more complex statistical methods are required
-            p_lower = max(p - (self.std_error / self.avg_distance()), 0)
-            p_higher = min(p + (self.std_error / self.avg_distance()), 1)
-
-            prob_lower = 1 - binom.cdf(hits -1, trials, p_lower)
-            prob_higher = 1 - binom.cdf(hits -1, trials, p_higher)
-        else:
-            prob_lower = prob_higher = None
-
-        # Update labels
-        self.prob_usual_label.config(text=f"Usual Probability: {prob_usual*100:.2f}%")
-        if prob_lower is not None and prob_higher is not None:
-            self.prob_lower_label.config(text=f"Lower Probability: {prob_lower*100:.2f}%")
-            self.prob_higher_label.config(text=f"Higher Probability: {prob_higher*100:.2f}%")
-        else:
+        if self.std_dev is None or self.std_error is None:
+            self.prob_usual_label.config(text="Usual Probability: N/A")
             self.prob_lower_label.config(text="Lower Probability: N/A")
             self.prob_higher_label.config(text="Higher Probability: N/A")
+            return
+
+        # Probability within 15 cm using the normal distribution
+        mean_dist = mean(self.distances)  # mean of distances from the center
+        usual_std_dev = self.std_dev
+
+        # Usual probability (within 15 cm, using the CDF of the normal distribution)
+        prob_usual = norm.cdf(15, loc=mean_dist, scale=usual_std_dev)
+
+        # Lower and upper bounds based on the standard error
+        lower_std_dev = max(usual_std_dev - self.std_error, 0)  # Ensure std_dev doesn't go below zero
+        upper_std_dev = usual_std_dev + self.std_error
+
+        prob_higher = norm.cdf(15, loc=mean_dist, scale=lower_std_dev)
+        prob_lower = norm.cdf(15, loc=mean_dist, scale=upper_std_dev)
+
+        # Convert probabilities into binomial form (since we are calculating for trials and hits)
+        prob_usual_binom = 1 - binom.cdf(hits - 1, trials, prob_usual)
+        prob_lower_binom = 1 - binom.cdf(hits - 1, trials, prob_lower)
+        prob_higher_binom = 1 - binom.cdf(hits - 1, trials, prob_higher)
+
+        # Update labels
+        self.prob_usual_label.config(text=f"Usual Probability: {prob_usual_binom * 100:.2f}%")
+        self.prob_lower_label.config(text=f"Lower Probability: {prob_lower_binom * 100:.2f}%")
+        self.prob_higher_label.config(text=f"Higher Probability: {prob_higher_binom * 100:.2f}%")
+
 
     def export_to_excel(self):
         if not self.shots_data_available():
