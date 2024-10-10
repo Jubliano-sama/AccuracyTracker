@@ -126,7 +126,7 @@ class ShotAccuracyApp:
         # Open a new window to input X and Y
         add_window = tk.Toplevel(self.master)
         add_window.title("Add New Shot")
-        add_window.geometry("300x150")
+        add_window.geometry("300x170")
         add_window.grab_set()  # Make the window modal
 
         tk.Label(add_window, text="X Coordinate (cm):").pack(pady=10)
@@ -442,6 +442,7 @@ def main():
         return
 
     root = tk.Tk()
+    root.state('zoomed')
     app = ShotAccuracyApp(root)
     root.mainloop()
 
