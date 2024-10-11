@@ -91,7 +91,7 @@ class ShotAccuracyApp:
         self.prob_usual_label = tk.Label(self.prob_frame, text="Usual Probability (Normal): N/A")
         self.prob_usual_label.grid(row=2, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_kde_label = tk.Label(self.prob_frame, text="Usual Probability (KDE): N/A")
+        self.prob_kde_label = tk.Label(self.prob_frame, text="Usual Probability KDE(not so accurate it seems): N/A")
         self.prob_kde_label.grid(row=3, column=0, columnspan=2, sticky='w', padx=10)
 
         self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Normal): N/A")
@@ -232,7 +232,7 @@ class ShotAccuracyApp:
     def calculate_probabilities(self):
         if not self.distances or not self.avg_coords:
             self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
-            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_kde_label.config(text="Usual Probability KDE(not so accurate it seems): N/A")
             self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
             self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
@@ -242,7 +242,7 @@ class ShotAccuracyApp:
         hits_str = self.hits_var.get().strip()
         if trials_str == "" or hits_str == "":
             self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
-            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_kde_label.config(text="Usual Probability KDE(not so accurate it seems): N/A")
             self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
             self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
@@ -253,14 +253,14 @@ class ShotAccuracyApp:
                 raise ValueError
         except ValueError:
             self.prob_usual_label.config(text="Usual Probability (Normal): Invalid Input")
-            self.prob_kde_label.config(text="Usual Probability (KDE): Invalid Input")
+            self.prob_kde_label.config(text="Usual Probability KDE(not so accurate it seems): Invalid Input")
             self.prob_lower_label.config(text="Lower Probability (Normal): Invalid Input")
             self.prob_higher_label.config(text="Higher Probability (Normal): Invalid Input")
             return
 
         if self.std_dev is None or self.std_error is None:
             self.prob_usual_label.config(text="Usual Probability (Normal): N/A")
-            self.prob_kde_label.config(text="Usual Probability (KDE): N/A")
+            self.prob_kde_label.config(text="Usual Probability KDE(not so accurate it seems): N/A")
             self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
             self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
             return
@@ -295,7 +295,7 @@ class ShotAccuracyApp:
             kde = gaussian_kde(self.distances, bw_method='scott')
 
             # Calculate probability within 15 cm by integrating the KDE
-            x = np.linspace(0, 30, 1000)  # 0 to 30 cm range for integration
+            x = np.linspace(-30, 30, 100000)  # 0 to 30 cm range for integration
             y = kde(x)
 
             # Find cumulative density for distances within 15 cm
@@ -306,12 +306,12 @@ class ShotAccuracyApp:
 
             # Update labels with both metrics (Normal and KDE)
             self.prob_usual_label.config(text=f"Usual Probability (Normal): {prob_usual_binom * 100:.2f}%")
-            self.prob_kde_label.config(text=f"Usual Probability (KDE): {prob_kde_binom * 100:.2f}%")
+            self.prob_kde_label.config(text=f"Usual Probability KDE(not so accurate it seems): {prob_kde_binom * 100:.2f}%")
             self.prob_lower_label.config(text=f"Lower Probability (Normal): {prob_lower_binom * 100:.2f}%")
             self.prob_higher_label.config(text=f"Higher Probability (Normal): {prob_higher_binom * 100:.2f}%")
         else:
             self.prob_usual_label.config(text="Usual Probability (Normal): N/A (insufficient data)")
-            self.prob_kde_label.config(text="Usual Probability (KDE): N/A (insufficient data)")
+            self.prob_kde_label.config(text="Usual Probability KDE(not so accurate it seems): N/A (insufficient data)")
             self.prob_lower_label.config(text="Lower Probability (Normal): N/A")
             self.prob_higher_label.config(text="Higher Probability (Normal): N/A")
 
@@ -396,7 +396,7 @@ class ShotAccuracyApp:
         self.ax_density.set_title('Distance to Center Density')
         self.ax_density.set_xlabel('Distance to Center (cm)')
         self.ax_density.set_ylabel('Density')
-        self.ax_density.set_xlim(-10, 30)
+        self.ax_density.set_xlim(-10, 60)
         self.ax_density.grid(True)
         self.fig_density.tight_layout()
         self.canvas_density.draw()
@@ -444,7 +444,7 @@ class ShotAccuracyApp:
             # Fit and plot the kernel density estimate
             from scipy.stats import gaussian_kde
             kde = gaussian_kde(self.distances, bw_method='scott')
-            x = np.linspace(0, 30, 100)
+            x = np.linspace(-10, 60, 1000)
             y = kde(x)
             self.ax_density.plot(x, y, color='blue', lw=2)
             self.ax_density.fill_between(x, y, color='skyblue', alpha=0.5)
