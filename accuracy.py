@@ -292,6 +292,8 @@ class ShotAccuracyApp:
         higher_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error)) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error))
         higher_prob_total = higher_prob_x * higher_prob_y
 
+        prob_binom_lower = 1 - binom.cdf(hits - 1, trials, lower_prob_total)
+        prob_binom_higher = 1 - binom.cdf(hits - 1, trials, higher_prob_total)
         # Update X and Y bounds probability
         self.prob_xy_label.config(text=f"Probability for X and Y bounds: {prob_total * 100:.2f}%")
         
@@ -299,8 +301,8 @@ class ShotAccuracyApp:
         self.prob_binomial_label.config(text=f"Binomial Probability (X and Y bounds): {prob_binom * 100:.2f}%")
 
         # Update lower and higher error bounds
-        self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {lower_prob_total * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability (Error Bound): {higher_prob_total * 100:.2f}%")
+        self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {prob_binom_lower * 100:.2f}%")
+        self.prob_higher_label.config(text=f"Higher Probability (Error Bound): {prob_binom_higher * 100:.2f}%")
 
     def export_to_excel(self):
         if not self.shots_data_available():
@@ -346,8 +348,8 @@ class ShotAccuracyApp:
         self.canvas_vis.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.setup_visualization()
 
-        # Distance Density Plot
-        self.fig_density, self.ax_density = plt.subplots(figsize=(6,6))
+        # Separate KDE plots for X and Y
+        self.fig_density, (self.ax_density_x, self.ax_density_y) = plt.subplots(2, 1, figsize=(6,6))
         self.canvas_density = FigureCanvasTkAgg(self.fig_density, master=self.density_frame)
         self.canvas_density.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.setup_density_plot()
@@ -361,11 +363,16 @@ class ShotAccuracyApp:
         self.canvas_vis.draw()
 
     def setup_density_plot(self):
-        self.ax_density.set_title('Distance to Center Density')
-        self.ax_density.set_xlabel('Distance to Center (cm)')
-        self.ax_density.set_ylabel('Density')
-        self.ax_density.set_xlim(-10, 60)
-        self.ax_density.grid(True)
+        self.ax_density_x.set_title('X Coordinate Density')
+        self.ax_density_x.set_xlabel('X (cm)')
+        self.ax_density_x.set_ylabel('Density')
+        self.ax_density_x.grid(True)
+
+        self.ax_density_y.set_title('Y Coordinate Density')
+        self.ax_density_y.set_xlabel('Y (cm)')
+        self.ax_density_y.set_ylabel('Density')
+        self.ax_density_y.grid(True)
+
         self.fig_density.tight_layout()
         self.canvas_density.draw()
 
@@ -401,20 +408,33 @@ class ShotAccuracyApp:
         self.fig_vis.tight_layout()
         self.canvas_vis.draw()
 
-        # Update Distance Density Plot
-        self.ax_density.clear()
-        self.ax_density.set_title('Distance to Center Density')
-        self.ax_density.set_xlabel('Distance to Center (cm)')
-        self.ax_density.set_ylabel('Density')
-        self.ax_density.grid(True)
-
-        if len(self.distances) > 2:
+        # Update KDE plots for X and Y coordinates
+        if len(shots) > 2:
             from scipy.stats import gaussian_kde
-            kde = gaussian_kde(self.distances, bw_method='scott')
-            x = np.linspace(-10, 60, 1000)
-            y = kde(x)
-            self.ax_density.plot(x, y, color='blue', lw=2)
-            self.ax_density.fill_between(x, y, color='skyblue', alpha=0.5)
+            x_vals = [shot[0] for shot in shots]
+            y_vals = [shot[1] for shot in shots]
+
+            # X KDE
+            self.ax_density_x.clear()
+            self.ax_density_x.set_title('X Coordinate Density')
+            self.ax_density_x.set_xlabel('X (cm)')
+            self.ax_density_x.set_ylabel('Density')
+            kde_x = gaussian_kde(x_vals, bw_method='scott')
+            x_range = np.linspace(min(x_vals) - 10, max(x_vals) + 10, 1000)
+            y_kde_x = kde_x(x_range)
+            self.ax_density_x.plot(x_range, y_kde_x, color='blue', lw=2)
+            self.ax_density_x.fill_between(x_range, y_kde_x, color='skyblue', alpha=0.5)
+
+            # Y KDE
+            self.ax_density_y.clear()
+            self.ax_density_y.set_title('Y Coordinate Density')
+            self.ax_density_y.set_xlabel('Y (cm)')
+            self.ax_density_y.set_ylabel('Density')
+            kde_y = gaussian_kde(y_vals, bw_method='scott')
+            y_range = np.linspace(min(y_vals) - 10, max(y_vals) + 10, 1000)
+            y_kde_y = kde_y(y_range)
+            self.ax_density_y.plot(y_range, y_kde_y, color='blue', lw=2)
+            self.ax_density_y.fill_between(y_range, y_kde_y, color='skyblue', alpha=0.5)
 
         self.fig_density.tight_layout()
         self.canvas_density.draw()
