@@ -91,10 +91,10 @@ class ShotAccuracyApp:
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
         # New Probability Labels for X/Y Bounds and Binomial
-        self.prob_xy_label = tk.Label(self.prob_frame, text="Probability for X and Y bounds: N/A")
+        self.prob_xy_label = tk.Label(self.prob_frame, text="Singular probability for shot hitting: N/A")
         self.prob_xy_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_binomial_label = tk.Label(self.prob_frame, text="Binomial Probability (X and Y bounds): N/A")
+        self.prob_binomial_label = tk.Label(self.prob_frame, text="Total Probability (X and Y bounds): N/A")
         self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
 
         # Error Probability Labels
@@ -235,8 +235,8 @@ class ShotAccuracyApp:
 
     def calculate_probabilities(self):
         if not self.distances or not self.avg_coords:
-            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
-            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
+            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -244,8 +244,8 @@ class ShotAccuracyApp:
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
         if trials_str == "" or hits_str == "":
-            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
-            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
+            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -256,15 +256,15 @@ class ShotAccuracyApp:
             if trials <= 0 or hits < 0 or hits > trials:
                 raise ValueError
         except ValueError:
-            self.prob_xy_label.config(text="Probability for X and Y bounds: Invalid Input")
-            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): Invalid Input")
+            self.prob_xy_label.config(text="Singular probability for shot hitting: Invalid Input")
+            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): Invalid Input")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): Invalid Input")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): Invalid Input")
             return
 
         if self.std_dev is None:
-            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
-            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
+            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -295,10 +295,10 @@ class ShotAccuracyApp:
         prob_binom_lower = 1 - binom.cdf(hits - 1, trials, lower_prob_total)
         prob_binom_higher = 1 - binom.cdf(hits - 1, trials, higher_prob_total)
         # Update X and Y bounds probability
-        self.prob_xy_label.config(text=f"Probability for X and Y bounds: {prob_total * 100:.2f}%")
+        self.prob_xy_label.config(text=f"Singular probability for shot hitting: {prob_total * 100:.2f}%")
         
-        # Update binomial probability for X and Y bounds
-        self.prob_binomial_label.config(text=f"Binomial Probability (X and Y bounds): {prob_binom * 100:.2f}%")
+        # Update binomial Singular probability for shot hitting
+        self.prob_binomial_label.config(text=f"Total Probability (X and Y bounds): {prob_binom * 100:.2f}%")
 
         # Update lower and higher error bounds
         self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {prob_binom_lower * 100:.2f}%")
