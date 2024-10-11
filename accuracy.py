@@ -212,7 +212,7 @@ class ShotAccuracyApp:
         self.accuracy_label.config(text=f"Accuracy (within 15cm): {within_radius} / {self.total_shots}")
 
         # Calculate standard deviation
-        if len(distances) >= 1:
+        if len(distances) > 1:
             self.std_dev = stdev(distances)
             self.stdX_dev = stdev(item[0] for item in shots)
             self.X_mean = mean(item[0] for item in shots)
