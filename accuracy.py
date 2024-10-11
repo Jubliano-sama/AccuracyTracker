@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
-from scipy.stats import norm
 
 class ShotAccuracyApp:
     def __init__(self, master):
@@ -22,7 +21,12 @@ class ShotAccuracyApp:
         self.distances = []
         self.accuracy = None
         self.std_dev = None
-        self.std_error = None
+        self.stdX_dev = None
+        self.stdY_dev = None
+        self.X_mean = None
+        self.Y_mean = None
+        self.stdX_error = None
+        self.stdY_error = None
         self.total_shots = 0
 
         # Tkinter Variables for live updates
@@ -69,12 +73,11 @@ class ShotAccuracyApp:
         self.std_label = tk.Label(self.metrics_frame, text="Standard Deviation: N/A")
         self.std_label.grid(row=2, column=0, sticky='w', padx=10)
 
-        self.error_label = tk.Label(self.metrics_frame, text="Error in Std Dev: N/A")
-        self.error_label.grid(row=3, column=0, sticky='w', padx=10)
+        self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
+        self.stdX_label.grid(row=3, column=0, sticky='w', padx=10)
 
-        # Separator
-        self.separator = ttk.Separator(master, orient='horizontal')
-        self.separator.pack(fill='x', pady=10)
+        self.stdY_label = tk.Label(self.metrics_frame, text="Standard Deviation Y: N/A")
+        self.stdY_label.grid(row=4, column=0, sticky='w', padx=10)
 
         # Probability Inputs
         self.trials_label = tk.Label(self.prob_frame, text="Number of Trials:")
@@ -87,15 +90,19 @@ class ShotAccuracyApp:
         self.hits_entry = tk.Entry(self.prob_frame, textvariable=self.hits_var)
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
-        # Probability Labels
-        self.prob_usual_label = tk.Label(self.prob_frame, text="Usual Probability: N/A")
-        self.prob_usual_label.grid(row=2, column=0, columnspan=2, sticky='w', padx=10)
+        # New Probability Labels for X/Y Bounds and Binomial
+        self.prob_xy_label = tk.Label(self.prob_frame, text="Probability for X and Y bounds: N/A")
+        self.prob_xy_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability: N/A")
-        self.prob_lower_label.grid(row=3, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_binomial_label = tk.Label(self.prob_frame, text="Binomial Probability (X and Y bounds): N/A")
+        self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability: N/A")
-        self.prob_higher_label.grid(row=4, column=0, columnspan=2, sticky='w', padx=10)
+        # Error Probability Labels
+        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Error Bound): N/A")
+        self.prob_lower_label.grid(row=8, column=0, columnspan=2, sticky='w', padx=10)
+
+        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (Error Bound): N/A")
+        self.prob_higher_label.grid(row=9, column=0, columnspan=2, sticky='w', padx=10)
 
         # Bind variable changes for live updates
         self.trials_var.trace_add('write', self.on_prob_input_change)
@@ -123,11 +130,10 @@ class ShotAccuracyApp:
         self.tree.bind('<KeyRelease>', self.on_shot_change)
 
     def add_shot(self):
-        # Open a new window to input X and Y
         add_window = tk.Toplevel(self.master)
         add_window.title("Add New Shot")
         add_window.geometry("300x170")
-        add_window.grab_set()  # Make the window modal
+        add_window.grab_set()
 
         tk.Label(add_window, text="X Coordinate (cm):").pack(pady=10)
         x_entry = tk.Entry(add_window)
@@ -181,12 +187,12 @@ class ShotAccuracyApp:
             self.avg_label.config(text="Average Coordinates: N/A")
             self.accuracy_label.config(text="Accuracy (within 15cm): N/A")
             self.std_label.config(text="Standard Deviation: N/A")
-            self.error_label.config(text="Error in Std Dev: N/A")
+            self.stdX_label.config(text="Standard Deviation X: N/A")
+            self.stdY_label.config(text="Standard Deviation Y: N/A")
             self.avg_coords = None
             self.distances = []
             self.accuracy = None
             self.std_dev = None
-            self.std_error = None
             self.total_shots = 0
             return
 
@@ -207,124 +213,119 @@ class ShotAccuracyApp:
 
         # Calculate standard deviation
         if len(distances) >= 1:
-            std_dev = stdev(distances) if len(distances) > 1 else None
-            self.std_dev = std_dev
-            self.std_label.config(text=f"Standard Deviation: {std_dev:.2f} cm" if std_dev is not None else "Standard Deviation: N/A")
-
-            # Calculate standard error of standard deviation
-            std_error = std_dev / sqrt(2 * (len(distances) - 1)) if std_dev is not None and len(distances) > 1 else None
-            self.std_error = std_error
-            self.error_label.config(text=f"Error in Std Dev: {std_error:.2f} cm" if std_error is not None else "Error in Std Dev: N/A")
+            self.std_dev = stdev(distances)
+            self.stdX_dev = stdev(item[0] for item in shots)
+            self.X_mean = mean(item[0] for item in shots)
+            self.Y_mean = mean(item[1] for item in shots)
+            self.stdY_dev = stdev(item[1] for item in shots)
+            self.std_label.config(text=f"Standard Deviation: {self.std_dev:.2f} cm")
+            self.stdX_label.config(text=f"Standard Deviation X: {self.stdX_dev:.2f} cm")
+            self.stdY_label.config(text=f"Standard Deviation Y: {self.stdY_dev:.2f} cm")
+            
+            # Calculate standard error for X and Y deviations
+            self.stdX_error = self.stdX_dev / sqrt(2 * (len(distances) - 1)) if self.stdX_dev is not None else None
+            self.stdY_error = self.stdY_dev / sqrt(2 * (len(distances) - 1)) if self.stdY_dev is not None else None
         else:
             self.std_dev = None
-            self.std_error = None
-            self.std_label.config(text=f"Standard Deviation: {std_dev:.2f} cm" if len(distances) > 1 else "Standard Deviation: N/A (insufficient data)")
-            self.error_label.config(text="Error in Std Dev: N/A")
+            self.std_label.config(text="Standard Deviation: N/A")
+            self.stdX_label.config(text="Standard Deviation X: N/A")
+            self.stdY_label.config(text="Standard Deviation Y: N/A")
 
-        # Store average coordinates
         self.avg_coords = (avg_x, avg_y)
-
-    from scipy.stats import norm
 
     def calculate_probabilities(self):
         if not self.distances or not self.avg_coords:
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
+            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
 
-        # Get user inputs
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
         if trials_str == "" or hits_str == "":
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
+            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
+
         try:
             trials = int(trials_str)
             hits = int(hits_str)
             if trials <= 0 or hits < 0 or hits > trials:
                 raise ValueError
         except ValueError:
-            self.prob_usual_label.config(text="Usual Probability: Invalid Input")
-            self.prob_lower_label.config(text="Lower Probability: Invalid Input")
-            self.prob_higher_label.config(text="Higher Probability: Invalid Input")
+            self.prob_xy_label.config(text="Probability for X and Y bounds: Invalid Input")
+            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): Invalid Input")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound): Invalid Input")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound): Invalid Input")
             return
 
-        if self.std_dev is None or self.std_error is None:
-            self.prob_usual_label.config(text="Usual Probability: N/A")
-            self.prob_lower_label.config(text="Lower Probability: N/A")
-            self.prob_higher_label.config(text="Higher Probability: N/A")
+        if self.std_dev is None:
+            self.prob_xy_label.config(text="Probability for X and Y bounds: N/A")
+            self.prob_binomial_label.config(text="Binomial Probability (X and Y bounds): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
 
-        # Probability within 15 cm using the normal distribution
-        mean_dist = mean(self.distances)  # mean of distances from the center
-        usual_std_dev = self.std_dev
+        # --- X and Y bounds probability calculation ---
+        
+        # Probability for X within [meanX - 15, meanX + 15]
+        prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev)
 
-        # Usual probability (within 15 cm, using the CDF of the normal distribution)
-        prob_usual = norm.cdf(15, loc=mean_dist, scale=usual_std_dev)
+        # Probability for Y within [meanY - 15, meanY + 15]
+        prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev)
 
-        # Lower and upper bounds based on the standard error
-        lower_std_dev = max(usual_std_dev - self.std_error, 0)  # Ensure std_dev doesn't go below zero
-        upper_std_dev = usual_std_dev + self.std_error
+        # Overall probability of hitting within both X and Y bounds
+        prob_total = prob_x * prob_y
 
-        prob_higher = norm.cdf(15, loc=mean_dist, scale=lower_std_dev)
-        prob_lower = norm.cdf(15, loc=mean_dist, scale=upper_std_dev)
+        # --- Binomial Distribution Calculation ---
+        prob_binom = 1 - binom.cdf(hits - 1, trials, prob_total)
 
-        # Convert probabilities into binomial form (since we are calculating for trials and hits)
-        prob_usual_binom = 1 - binom.cdf(hits - 1, trials, prob_usual)
-        prob_lower_binom = 1 - binom.cdf(hits - 1, trials, prob_lower)
-        prob_higher_binom = 1 - binom.cdf(hits - 1, trials, prob_higher)
+        # Calculate error bounds
+        lower_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error)
+        lower_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error)
+        lower_prob_total = lower_prob_x * lower_prob_y
 
-        # Update labels
-        self.prob_usual_label.config(text=f"Usual Probability: {prob_usual_binom * 100:.2f}%")
-        self.prob_lower_label.config(text=f"Lower Probability: {prob_lower_binom * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability: {prob_higher_binom * 100:.2f}%")
+        higher_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error)) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error))
+        higher_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error)) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error))
+        higher_prob_total = higher_prob_x * higher_prob_y
 
+        # Update X and Y bounds probability
+        self.prob_xy_label.config(text=f"Probability for X and Y bounds: {prob_total * 100:.2f}%")
+        
+        # Update binomial probability for X and Y bounds
+        self.prob_binomial_label.config(text=f"Binomial Probability (X and Y bounds): {prob_binom * 100:.2f}%")
+
+        # Update lower and higher error bounds
+        self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {lower_prob_total * 100:.2f}%")
+        self.prob_higher_label.config(text=f"Higher Probability (Error Bound): {higher_prob_total * 100:.2f}%")
 
     def export_to_excel(self):
         if not self.shots_data_available():
             messagebox.showerror("No Data", "There is no data to export. Please add shots and calculate metrics first.")
             return
 
-        # Ask user for file location
-        file_path = filedialog.asksaveasfilename(defaultextension='.xlsx',
-                                                 filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        file_path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
         if not file_path:
-            return  # User cancelled
+            return
 
-        # Prepare data
         data = [(float(self.tree.item(item)['values'][0]), float(self.tree.item(item)['values'][1])) for item in self.tree.get_children()]
         df_shots = pd.DataFrame(data, columns=['X (cm)', 'Y (cm)'])
 
-        # Metrics
         metrics = {
             'Average X (cm)': [self.avg_coords[0]],
             'Average Y (cm)': [self.avg_coords[1]],
             'Accuracy (within 15cm)': [f"{self.accuracy} / {self.total_shots}"],
-            'Standard Deviation (cm)': [f"{self.std_dev:.2f}" if self.std_dev else "N/A"],
-            'Error in Std Dev (cm)': [f"{self.std_error:.2f}" if self.std_error else "N/A"]
+            'Standard Deviation (cm)': [f"{self.std_dev:.2f}" if self.std_dev else "N/A"]
         }
         df_metrics = pd.DataFrame(metrics)
 
-        # Probabilities
-        prob_usual = self.prob_usual_label.cget("text").split(": ")[1] if hasattr(self, 'prob_usual_label') else "N/A"
-        prob_lower = self.prob_lower_label.cget("text").split(": ")[1] if hasattr(self, 'prob_lower_label') else "N/A"
-        prob_higher = self.prob_higher_label.cget("text").split(": ")[1] if hasattr(self, 'prob_higher_label') else "N/A"
-
-        prob_data = {
-            'Probability Type': ['Usual Probability', 'Lower Probability', 'Higher Probability'],
-            'Value (%)': [prob_usual, prob_lower, prob_higher]
-        }
-        df_prob = pd.DataFrame(prob_data)
-
-        # Write to Excel
         try:
             with pd.ExcelWriter(file_path) as writer:
                 df_shots.to_excel(writer, sheet_name='Shots', index=False)
                 df_metrics.to_excel(writer, sheet_name='Metrics', index=False)
-                df_prob.to_excel(writer, sheet_name='Probabilities', index=False)
             messagebox.showinfo("Export Successful", f"Data exported successfully to {file_path}")
         except Exception as e:
             messagebox.showerror("Export Error", f"An error occurred while exporting: {e}")
@@ -363,7 +364,7 @@ class ShotAccuracyApp:
         self.ax_density.set_title('Distance to Center Density')
         self.ax_density.set_xlabel('Distance to Center (cm)')
         self.ax_density.set_ylabel('Density')
-        self.ax_density.set_xlim(0, 30)
+        self.ax_density.set_xlim(-10, 60)
         self.ax_density.grid(True)
         self.fig_density.tight_layout()
         self.canvas_density.draw()
@@ -408,10 +409,9 @@ class ShotAccuracyApp:
         self.ax_density.grid(True)
 
         if len(self.distances) > 2:
-            # Fit and plot the kernel density estimate
             from scipy.stats import gaussian_kde
             kde = gaussian_kde(self.distances, bw_method='scott')
-            x = np.linspace(0, 30, 100)
+            x = np.linspace(-10, 60, 1000)
             y = kde(x)
             self.ax_density.plot(x, y, color='blue', lw=2)
             self.ax_density.fill_between(x, y, color='skyblue', alpha=0.5)
@@ -422,25 +422,12 @@ class ShotAccuracyApp:
     def avg_distance(self):
         if self.distances:
             return mean(self.distances)
-        return 1  # Prevent division by zero
+        return 1
 
     def on_prob_input_change(self, *args):
         self.calculate_probabilities()
 
 def main():
-    # Check for required libraries
-    try:
-        import tkinter
-        import pandas
-        import matplotlib
-        import scipy
-    except ImportError as e:
-        missing_module = str(e).split()[-1]
-        # Since we can't use messagebox here as it's part of tkinter,
-        # we print the error and exit.
-        print(f"Missing module: {missing_module}. Please install it using pip.")
-        return
-
     root = tk.Tk()
     root.state('zoomed')
     app = ShotAccuracyApp(root)
