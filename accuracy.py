@@ -20,7 +20,6 @@ class ShotAccuracyApp:
         self.avg_coords = None
         self.distances = []
         self.accuracy = None
-        self.std_dev = None
         self.stdX_dev = None
         self.stdY_dev = None
         self.X_mean = None
@@ -255,7 +254,7 @@ class ShotAccuracyApp:
             self.prob_higher_label.config(text="Higher Probability (Error Bound): Invalid Input")
             return
 
-        if self.std_dev is None:
+        if self.stdX_dev is None or self.stdY_dev is None:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
