@@ -70,9 +70,6 @@ class ShotAccuracyApp:
         self.accuracy_label = tk.Label(self.metrics_frame, text="Accuracy (within 15cm): N/A")
         self.accuracy_label.grid(row=1, column=0, sticky='w', padx=10)
 
-        self.std_label = tk.Label(self.metrics_frame, text="Standard Deviation: N/A")
-        self.std_label.grid(row=2, column=0, sticky='w', padx=10)
-
         self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
         self.stdX_label.grid(row=3, column=0, sticky='w', padx=10)
 
@@ -91,10 +88,10 @@ class ShotAccuracyApp:
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
         # New Probability Labels for X/Y Bounds and Binomial
-        self.prob_xy_label = tk.Label(self.prob_frame, text="Singular probability for shot hitting: N/A")
+        self.prob_xy_label = tk.Label(self.prob_frame, text="Probability of one shot hitting: N/A")
         self.prob_xy_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_binomial_label = tk.Label(self.prob_frame, text="Total Probability (X and Y bounds): N/A")
+        self.prob_binomial_label = tk.Label(self.prob_frame, text="Probability of reaching desired result: N/A")
         self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
 
         # Error Probability Labels
@@ -186,7 +183,6 @@ class ShotAccuracyApp:
         if not shots:
             self.avg_label.config(text="Average Coordinates: N/A")
             self.accuracy_label.config(text="Accuracy (within 15cm): N/A")
-            self.std_label.config(text="Standard Deviation: N/A")
             self.stdX_label.config(text="Standard Deviation X: N/A")
             self.stdY_label.config(text="Standard Deviation Y: N/A")
             self.avg_coords = None
@@ -213,21 +209,18 @@ class ShotAccuracyApp:
 
         # Calculate standard deviation
         if len(distances) > 1:
-            self.std_dev = stdev(distances)
             self.stdX_dev = stdev(item[0] for item in shots)
             self.X_mean = mean(item[0] for item in shots)
             self.Y_mean = mean(item[1] for item in shots)
             self.stdY_dev = stdev(item[1] for item in shots)
-            self.std_label.config(text=f"Standard Deviation: {self.std_dev:.2f} cm")
             self.stdX_label.config(text=f"Standard Deviation X: {self.stdX_dev:.2f} cm")
             self.stdY_label.config(text=f"Standard Deviation Y: {self.stdY_dev:.2f} cm")
             
             # Calculate standard error for X and Y deviations
-            self.stdX_error = self.stdX_dev / sqrt(2 * (len(distances) - 1)) if self.stdX_dev is not None else None
-            self.stdY_error = self.stdY_dev / sqrt(2 * (len(distances) - 1)) if self.stdY_dev is not None else None
+            self.stdX_error = self.stdX_dev / sqrt(2 * (len(distances) - 1))
+            self.stdY_error = self.stdY_dev / sqrt(2 * (len(distances) - 1))
         else:
             self.std_dev = None
-            self.std_label.config(text="Standard Deviation: N/A")
             self.stdX_label.config(text="Standard Deviation X: N/A")
             self.stdY_label.config(text="Standard Deviation Y: N/A")
 
@@ -235,8 +228,8 @@ class ShotAccuracyApp:
 
     def calculate_probabilities(self):
         if not self.distances or not self.avg_coords:
-            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
-            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
+            self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -244,8 +237,8 @@ class ShotAccuracyApp:
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
         if trials_str == "" or hits_str == "":
-            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
-            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
+            self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -256,15 +249,15 @@ class ShotAccuracyApp:
             if trials <= 0 or hits < 0 or hits > trials:
                 raise ValueError
         except ValueError:
-            self.prob_xy_label.config(text="Singular probability for shot hitting: Invalid Input")
-            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): Invalid Input")
+            self.prob_xy_label.config(text="Probability of one shot hitting: Invalid Input")
+            self.prob_binomial_label.config(text="Probability of reaching desired result: Invalid Input")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): Invalid Input")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): Invalid Input")
             return
 
         if self.std_dev is None:
-            self.prob_xy_label.config(text="Singular probability for shot hitting: N/A")
-            self.prob_binomial_label.config(text="Total Probability (X and Y bounds): N/A")
+            self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
+            self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
             self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
             self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
             return
@@ -295,10 +288,10 @@ class ShotAccuracyApp:
         prob_binom_lower = 1 - binom.cdf(hits - 1, trials, lower_prob_total)
         prob_binom_higher = 1 - binom.cdf(hits - 1, trials, higher_prob_total)
         # Update X and Y bounds probability
-        self.prob_xy_label.config(text=f"Singular probability for shot hitting: {prob_total * 100:.2f}%")
+        self.prob_xy_label.config(text=f"Probability of one shot hitting: {prob_total * 100:.2f}%")
         
-        # Update binomial Singular probability for shot hitting
-        self.prob_binomial_label.config(text=f"Total Probability (X and Y bounds): {prob_binom * 100:.2f}%")
+        # Update binomial Probability of one shot hitting
+        self.prob_binomial_label.config(text=f"Probability of reaching desired result: {prob_binom * 100:.2f}%")
 
         # Update lower and higher error bounds
         self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {prob_binom_lower * 100:.2f}%")
@@ -316,18 +309,9 @@ class ShotAccuracyApp:
         data = [(float(self.tree.item(item)['values'][0]), float(self.tree.item(item)['values'][1])) for item in self.tree.get_children()]
         df_shots = pd.DataFrame(data, columns=['X (cm)', 'Y (cm)'])
 
-        metrics = {
-            'Average X (cm)': [self.avg_coords[0]],
-            'Average Y (cm)': [self.avg_coords[1]],
-            'Accuracy (within 15cm)': [f"{self.accuracy} / {self.total_shots}"],
-            'Standard Deviation (cm)': [f"{self.std_dev:.2f}" if self.std_dev else "N/A"]
-        }
-        df_metrics = pd.DataFrame(metrics)
-
         try:
             with pd.ExcelWriter(file_path) as writer:
                 df_shots.to_excel(writer, sheet_name='Shots', index=False)
-                df_metrics.to_excel(writer, sheet_name='Metrics', index=False)
             messagebox.showinfo("Export Successful", f"Data exported successfully to {file_path}")
         except Exception as e:
             messagebox.showerror("Export Error", f"An error occurred while exporting: {e}")
