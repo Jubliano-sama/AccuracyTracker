@@ -58,9 +58,13 @@ class ShotAccuracyApp:
         self.remove_button = tk.Button(self.controls_frame, text="Remove Selected Shot", command=self.remove_shot)
         self.remove_button.grid(row=0, column=1, padx=5)
 
+        # Import from Excel Button
+        self.import_button = tk.Button(self.controls_frame, text="Import from Excel", command=self.import_from_excel)
+        self.import_button.grid(row=0, column=2, padx=5)
+
         # Export to Excel Button
         self.export_button = tk.Button(self.controls_frame, text="Export to Excel", command=self.export_to_excel)
-        self.export_button.grid(row=0, column=2, padx=5)
+        self.export_button.grid(row=0, column=3, padx=5)
 
         # Metrics Labels
         self.avg_label = tk.Label(self.metrics_frame, text="Average Coordinates: N/A")
@@ -164,6 +168,33 @@ class ShotAccuracyApp:
         for item in selected_item:
             self.tree.delete(item)
         self.update_metrics_and_visualization()
+
+    def import_from_excel(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        if not file_path:
+            return
+
+        try:
+            df_shots = pd.read_excel(file_path)
+            if 'X (cm)' not in df_shots.columns or 'Y (cm)' not in df_shots.columns:
+                messagebox.showerror("Import Error", "The Excel file must contain 'X (cm)' and 'Y (cm)' columns.")
+                return
+
+            # Clear current data
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+
+            # Insert data from Excel
+            for _, row in df_shots.iterrows():
+                x = row['X (cm)']
+                y = row['Y (cm)']
+                self.tree.insert('', 'end', values=(x, y))
+
+            self.update_metrics_and_visualization()
+            messagebox.showinfo("Import Successful", f"Data imported successfully from {file_path}")
+        except Exception as e:
+            messagebox.showerror("Import Error", f"An error occurred while importing: {e}")
+
 
     def on_shot_change(self, event):
         self.update_metrics_and_visualization()
