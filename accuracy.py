@@ -98,10 +98,10 @@ class ShotAccuracyApp:
         self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
 
         # Error Probability Labels
-        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Error Bound): N/A")
+        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Error Bound 95% confidence): N/A")
         self.prob_lower_label.grid(row=8, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (Error Bound): N/A")
+        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (Error Bound 95% confidence): N/A")
         self.prob_higher_label.grid(row=9, column=0, columnspan=2, sticky='w', padx=10)
 
         # Bind variable changes for live updates
@@ -260,8 +260,8 @@ class ShotAccuracyApp:
         if not self.distances or not self.avg_coords:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
             return
 
         trials_str = self.trials_var.get().strip()
@@ -269,8 +269,8 @@ class ShotAccuracyApp:
         if trials_str == "" or hits_str == "":
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
             return
 
         try:
@@ -281,15 +281,15 @@ class ShotAccuracyApp:
         except ValueError:
             self.prob_xy_label.config(text="Probability of one shot hitting: Invalid Input")
             self.prob_binomial_label.config(text="Probability of reaching desired result: Invalid Input")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound): Invalid Input")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound): Invalid Input")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): Invalid Input")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): Invalid Input")
             return
 
         if self.stdX_dev is None or self.stdY_dev is None:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound): N/A")
+            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
             return
 
         # --- X and Y bounds probability calculation ---
@@ -324,8 +324,8 @@ class ShotAccuracyApp:
         self.prob_binomial_label.config(text=f"Probability of reaching desired result: {prob_binom * 100:.2f}%")
 
         # Update lower and higher error bounds
-        self.prob_lower_label.config(text=f"Lower Probability (Error Bound): {prob_binom_lower * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability (Error Bound): {prob_binom_higher * 100:.2f}%")
+        self.prob_lower_label.config(text=f"Lower Probability (Error Bound 95% confidence): {prob_binom_lower * 100:.2f}%")
+        self.prob_higher_label.config(text=f"Higher Probability (Error Bound 95% confidence): {prob_binom_higher * 100:.2f}%")
 
     def export_to_excel(self):
         if not self.shots_data_available():
