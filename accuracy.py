@@ -307,12 +307,12 @@ class ShotAccuracyApp:
         prob_binom = 1 - binom.cdf(hits - 1, trials, prob_total)
 
         # Calculate error bounds
-        lower_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error)
-        lower_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error)
+        lower_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev + 2 * self.stdX_error) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error)
+        lower_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev + 2 * self.stdY_error) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error)
         lower_prob_total = lower_prob_x * lower_prob_y
 
-        higher_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error)) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error))
-        higher_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error)) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error))
+        higher_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - 2 * self.stdX_error)) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error))
+        higher_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - 2 * self.stdY_error)) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error))
         higher_prob_total = higher_prob_x * higher_prob_y
 
         prob_binom_lower = 1 - binom.cdf(hits - 1, trials, lower_prob_total)
