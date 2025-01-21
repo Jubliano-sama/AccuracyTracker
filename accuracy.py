@@ -27,10 +27,12 @@ class ShotAccuracyApp:
         self.stdX_error = None
         self.stdY_error = None
         self.total_shots = 0
+        self.valid_radius = 15.0  # Initialize valid radius
 
         # Tkinter Variables for live updates
         self.trials_var = tk.StringVar()
         self.hits_var = tk.StringVar()
+        self.radius_var = tk.StringVar(value=str(self.valid_radius))
 
         # Create frames for better layout
         self.input_frame = tk.Frame(master)
@@ -66,11 +68,18 @@ class ShotAccuracyApp:
         self.export_button = tk.Button(self.controls_frame, text="Export to Excel", command=self.export_to_excel)
         self.export_button.grid(row=0, column=3, padx=5)
 
+        # Radius input
+        self.radius_label = tk.Label(self.controls_frame, text="Target Radius (cm):")
+        self.radius_label.grid(row=1, column=0, padx=5, pady=5, sticky='e')
+
+        self.radius_entry = tk.Entry(self.controls_frame, textvariable=self.radius_var, width=10)
+        self.radius_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
+
         # Metrics Labels
         self.avg_label = tk.Label(self.metrics_frame, text="Average Coordinates: N/A")
         self.avg_label.grid(row=0, column=0, sticky='w', padx=10)
 
-        self.accuracy_label = tk.Label(self.metrics_frame, text="Accuracy (within 15cm): N/A")
+        self.accuracy_label = tk.Label(self.metrics_frame, text=f"Accuracy (within {self.valid_radius}cm): N/A")
         self.accuracy_label.grid(row=1, column=0, sticky='w', padx=10)
 
         self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
@@ -90,7 +99,7 @@ class ShotAccuracyApp:
         self.hits_entry = tk.Entry(self.prob_frame, textvariable=self.hits_var)
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
-        # New Probability Labels for X/Y Bounds and Binomial
+        # Probability Labels
         self.prob_xy_label = tk.Label(self.prob_frame, text="Probability of one shot hitting: N/A")
         self.prob_xy_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=10)
 
@@ -98,15 +107,22 @@ class ShotAccuracyApp:
         self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
 
         # Error Probability Labels
-        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (Error Bound 95% confidence): N/A")
+        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (95% confidence): N/A")
         self.prob_lower_label.grid(row=8, column=0, columnspan=2, sticky='w', padx=10)
 
-        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (Error Bound 95% confidence): N/A")
+        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (95% confidence): N/A")
         self.prob_higher_label.grid(row=9, column=0, columnspan=2, sticky='w', padx=10)
+
+        self.prob_lower_50_label = tk.Label(self.prob_frame, text="Lower Probability (50% confidence): N/A")
+        self.prob_lower_50_label.grid(row=10, column=0, columnspan=2, sticky='w', padx=10)
+
+        self.prob_higher_50_label = tk.Label(self.prob_frame, text="Higher Probability (50% confidence): N/A")
+        self.prob_higher_50_label.grid(row=11, column=0, columnspan=2, sticky='w', padx=10)
 
         # Bind variable changes for live updates
         self.trials_var.trace_add('write', self.on_prob_input_change)
         self.hits_var.trace_add('write', self.on_prob_input_change)
+        self.radius_var.trace_add('write', self.on_radius_change)
 
         # Visualization Plot
         self.setup_visualization_plot()
@@ -120,12 +136,10 @@ class ShotAccuracyApp:
         self.tree.column('#2', width=100, anchor='center')
         self.tree.pack(side='left', fill=tk.BOTH, expand=True)
 
-        # Add scrollbar
         scrollbar = ttk.Scrollbar(self.input_frame, orient=tk.VERTICAL, command=self.tree.yview)
         self.tree.configure(yscroll=scrollbar.set)
         scrollbar.pack(side='right', fill='y')
 
-        # Bind treeview modifications for live updates
         self.tree.bind('<ButtonRelease-1>', self.on_shot_change)
         self.tree.bind('<KeyRelease>', self.on_shot_change)
 
@@ -180,11 +194,9 @@ class ShotAccuracyApp:
                 messagebox.showerror("Import Error", "The Excel file must contain 'X (cm)' and 'Y (cm)' columns.")
                 return
 
-            # Clear current data
             for item in self.tree.get_children():
                 self.tree.delete(item)
 
-            # Insert data from Excel
             for _, row in df_shots.iterrows():
                 x = row['X (cm)']
                 y = row['Y (cm)']
@@ -194,7 +206,6 @@ class ShotAccuracyApp:
             messagebox.showinfo("Import Successful", f"Data imported successfully from {file_path}")
         except Exception as e:
             messagebox.showerror("Import Error", f"An error occurred while importing: {e}")
-
 
     def on_shot_change(self, event):
         self.update_metrics_and_visualization()
@@ -212,7 +223,7 @@ class ShotAccuracyApp:
 
         if not shots:
             self.avg_label.config(text="Average Coordinates: N/A")
-            self.accuracy_label.config(text="Accuracy (within 15cm): N/A")
+            self.accuracy_label.config(text=f"Accuracy (within {self.valid_radius}cm): N/A")
             self.stdX_label.config(text="Standard Deviation X: N/A")
             self.stdY_label.config(text="Standard Deviation Y: N/A")
             self.avg_coords = None
@@ -222,22 +233,18 @@ class ShotAccuracyApp:
             self.total_shots = 0
             return
 
-        # Calculate average coordinates
         avg_x = mean([shot[0] for shot in shots])
         avg_y = mean([shot[1] for shot in shots])
         self.avg_label.config(text=f"Average Coordinates: ({avg_x:.2f}, {avg_y:.2f}) cm")
 
-        # Calculate distances from center
         distances = [sqrt((shot[0] - avg_x) ** 2 + (shot[1] - avg_y) ** 2) for shot in shots]
         self.distances = distances
 
-        # Calculate accuracy
-        within_radius = sum(1 for d in distances if d <= 15)
+        within_radius = sum(1 for d in distances if d <= self.valid_radius)
         self.accuracy = within_radius
         self.total_shots = len(shots)
-        self.accuracy_label.config(text=f"Accuracy (within 15cm): {within_radius} / {self.total_shots}")
+        self.accuracy_label.config(text=f"Accuracy (within {self.valid_radius}cm): {within_radius} / {self.total_shots}")
 
-        # Calculate standard deviation
         if len(distances) > 1:
             self.stdX_dev = stdev(item[0] for item in shots)
             self.X_mean = mean(item[0] for item in shots)
@@ -246,7 +253,6 @@ class ShotAccuracyApp:
             self.stdX_label.config(text=f"Standard Deviation X: {self.stdX_dev:.2f} cm")
             self.stdY_label.config(text=f"Standard Deviation Y: {self.stdY_dev:.2f} cm")
             
-            # Calculate standard error for X and Y deviations
             self.stdX_error = self.stdX_dev / sqrt(2 * (len(distances) - 1))
             self.stdY_error = self.stdY_dev / sqrt(2 * (len(distances) - 1))
         else:
@@ -260,8 +266,10 @@ class ShotAccuracyApp:
         if not self.distances or not self.avg_coords:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
+            self.prob_lower_label.config(text="Lower Probability (95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (95% confidence): N/A")
+            self.prob_lower_50_label.config(text="Lower Probability (50% confidence): N/A")
+            self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
         trials_str = self.trials_var.get().strip()
@@ -269,8 +277,10 @@ class ShotAccuracyApp:
         if trials_str == "" or hits_str == "":
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
+            self.prob_lower_label.config(text="Lower Probability (95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (95% confidence): N/A")
+            self.prob_lower_50_label.config(text="Lower Probability (50% confidence): N/A")
+            self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
         try:
@@ -281,51 +291,72 @@ class ShotAccuracyApp:
         except ValueError:
             self.prob_xy_label.config(text="Probability of one shot hitting: Invalid Input")
             self.prob_binomial_label.config(text="Probability of reaching desired result: Invalid Input")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): Invalid Input")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): Invalid Input")
+            self.prob_lower_label.config(text="Lower Probability (95% confidence): Invalid Input")
+            self.prob_higher_label.config(text="Higher Probability (95% confidence): Invalid Input")
+            self.prob_lower_50_label.config(text="Lower Probability (50% confidence): Invalid Input")
+            self.prob_higher_50_label.config(text="Higher Probability (50% confidence): Invalid Input")
             return
 
         if self.stdX_dev is None or self.stdY_dev is None:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (Error Bound 95% confidence): N/A")
-            self.prob_higher_label.config(text="Higher Probability (Error Bound 95% confidence): N/A")
+            self.prob_lower_label.config(text="Lower Probability (95% confidence): N/A")
+            self.prob_higher_label.config(text="Higher Probability (95% confidence): N/A")
+            self.prob_lower_50_label.config(text="Lower Probability (50% confidence): N/A")
+            self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
-        # --- X and Y bounds probability calculation ---
-        
-        # Probability for X within [meanX - 15, meanX + 15]
-        prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev)
+        radius = self.valid_radius
 
-        # Probability for Y within [meanY - 15, meanY + 15]
-        prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev)
-
-        # Overall probability of hitting within both X and Y bounds
+        # Calculate probabilities for X and Y bounds
+        prob_x = norm.cdf(self.X_mean + radius, loc=self.X_mean, scale=self.stdX_dev) - norm.cdf(self.X_mean - radius, loc=self.X_mean, scale=self.stdX_dev)
+        prob_y = norm.cdf(self.Y_mean + radius, loc=self.Y_mean, scale=self.stdY_dev) - norm.cdf(self.Y_mean - radius, loc=self.Y_mean, scale=self.stdY_dev)
         prob_total = prob_x * prob_y
 
-        # --- Binomial Distribution Calculation ---
+        # Binomial probability
         prob_binom = 1 - binom.cdf(hits - 1, trials, prob_total)
 
-        # Calculate error bounds
-        lower_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=self.stdX_dev + 2 * self.stdX_error) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=self.stdX_dev + self.stdX_error)
-        lower_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=self.stdY_dev + 2 * self.stdY_error) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=self.stdY_dev + self.stdY_error)
-        lower_prob_total = lower_prob_x * lower_prob_y
+        # 95% confidence bounds
+        z_95 = 1.96
+        lower_stdX_95 = self.stdX_dev + z_95 * self.stdX_error
+        lower_stdY_95 = self.stdY_dev + z_95 * self.stdY_error
+        lower_prob_x_95 = norm.cdf(self.X_mean + radius, self.X_mean, lower_stdX_95) - norm.cdf(self.X_mean - radius, self.X_mean, lower_stdX_95)
+        lower_prob_y_95 = norm.cdf(self.Y_mean + radius, self.Y_mean, lower_stdY_95) - norm.cdf(self.Y_mean - radius, self.Y_mean, lower_stdY_95)
+        lower_prob_total_95 = lower_prob_x_95 * lower_prob_y_95
 
-        higher_prob_x = norm.cdf(self.X_mean + 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - 2 * self.stdX_error)) - norm.cdf(self.X_mean - 15, loc=self.X_mean, scale=max(0.01, self.stdX_dev - self.stdX_error))
-        higher_prob_y = norm.cdf(self.Y_mean + 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - 2 * self.stdY_error)) - norm.cdf(self.Y_mean - 15, loc=self.Y_mean, scale=max(0.01, self.stdY_dev - self.stdY_error))
-        higher_prob_total = higher_prob_x * higher_prob_y
+        higher_stdX_95 = max(0.01, self.stdX_dev - z_95 * self.stdX_error)
+        higher_stdY_95 = max(0.01, self.stdY_dev - z_95 * self.stdY_error)
+        higher_prob_x_95 = norm.cdf(self.X_mean + radius, self.X_mean, higher_stdX_95) - norm.cdf(self.X_mean - radius, self.X_mean, higher_stdX_95)
+        higher_prob_y_95 = norm.cdf(self.Y_mean + radius, self.Y_mean, higher_stdY_95) - norm.cdf(self.Y_mean - radius, self.Y_mean, higher_stdY_95)
+        higher_prob_total_95 = higher_prob_x_95 * higher_prob_y_95
 
-        prob_binom_lower = 1 - binom.cdf(hits - 1, trials, lower_prob_total)
-        prob_binom_higher = 1 - binom.cdf(hits - 1, trials, higher_prob_total)
-        # Update X and Y bounds probability
+        prob_binom_lower_95 = 1 - binom.cdf(hits - 1, trials, lower_prob_total_95)
+        prob_binom_higher_95 = 1 - binom.cdf(hits - 1, trials, higher_prob_total_95)
+
+        # 50% confidence bounds
+        z_50 = 0.6745
+        lower_stdX_50 = self.stdX_dev + z_50 * self.stdX_error
+        lower_stdY_50 = self.stdY_dev + z_50 * self.stdY_error
+        lower_prob_x_50 = norm.cdf(self.X_mean + radius, self.X_mean, lower_stdX_50) - norm.cdf(self.X_mean - radius, self.X_mean, lower_stdX_50)
+        lower_prob_y_50 = norm.cdf(self.Y_mean + radius, self.Y_mean, lower_stdY_50) - norm.cdf(self.Y_mean - radius, self.Y_mean, lower_stdY_50)
+        lower_prob_total_50 = lower_prob_x_50 * lower_prob_y_50
+
+        higher_stdX_50 = max(0.01, self.stdX_dev - z_50 * self.stdX_error)
+        higher_stdY_50 = max(0.01, self.stdY_dev - z_50 * self.stdY_error)
+        higher_prob_x_50 = norm.cdf(self.X_mean + radius, self.X_mean, higher_stdX_50) - norm.cdf(self.X_mean - radius, self.X_mean, higher_stdX_50)
+        higher_prob_y_50 = norm.cdf(self.Y_mean + radius, self.Y_mean, higher_stdY_50) - norm.cdf(self.Y_mean - radius, self.Y_mean, higher_stdY_50)
+        higher_prob_total_50 = higher_prob_x_50 * higher_prob_y_50
+
+        prob_binom_lower_50 = 1 - binom.cdf(hits - 1, trials, lower_prob_total_50)
+        prob_binom_higher_50 = 1 - binom.cdf(hits - 1, trials, higher_prob_total_50)
+
+        # Update labels
         self.prob_xy_label.config(text=f"Probability of one shot hitting: {prob_total * 100:.2f}%")
-        
-        # Update binomial Probability of one shot hitting
         self.prob_binomial_label.config(text=f"Probability of reaching desired result: {prob_binom * 100:.2f}%")
-
-        # Update lower and higher error bounds
-        self.prob_lower_label.config(text=f"Lower Probability (Error Bound 95% confidence): {prob_binom_lower * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability (Error Bound 95% confidence): {prob_binom_higher * 100:.2f}%")
+        self.prob_lower_label.config(text=f"Lower Probability (95% confidence): {prob_binom_lower_95 * 100:.2f}%")
+        self.prob_higher_label.config(text=f"Higher Probability (95% confidence): {prob_binom_higher_95 * 100:.2f}%")
+        self.prob_lower_50_label.config(text=f"Lower Probability (50% confidence): {prob_binom_lower_50 * 100:.2f}%")
+        self.prob_higher_50_label.config(text=f"Higher Probability (50% confidence): {prob_binom_higher_50 * 100:.2f}%")
 
     def export_to_excel(self):
         if not self.shots_data_available():
@@ -391,7 +422,6 @@ class ShotAccuracyApp:
         self.canvas_density.draw()
 
     def update_visualization(self):
-        # Update Shot Distribution Plot
         self.ax_vis.clear()
         self.ax_vis.set_title('Shot Distribution')
         self.ax_vis.set_xlabel('X (cm)')
@@ -409,11 +439,8 @@ class ShotAccuracyApp:
             self.ax_vis.scatter(x_vals, y_vals, c='blue', label='Shots')
 
             if self.avg_coords:
-                # Plot center
                 self.ax_vis.scatter(self.avg_coords[0], self.avg_coords[1], c='green', marker='x', s=100, label='Center')
-
-                # Plot 15cm radius
-                circle = Circle(self.avg_coords, 15, color='red', fill=False, linestyle='--', label='15cm Radius')
+                circle = Circle(self.avg_coords, self.valid_radius, color='red', fill=False, linestyle='--', label=f'{self.valid_radius}cm Radius')
                 self.ax_vis.add_patch(circle)
 
             self.ax_vis.legend()
@@ -422,41 +449,45 @@ class ShotAccuracyApp:
         self.fig_vis.tight_layout()
         self.canvas_vis.draw()
 
-        # Update KDE plots for X and Y coordinates
         if len(shots) > 2:
             from scipy.stats import gaussian_kde
             x_vals = [shot[0] for shot in shots]
             y_vals = [shot[1] for shot in shots]
 
-            # X KDE
             self.ax_density_x.clear()
-            self.ax_density_x.set_title('X Coordinate Density')
-            self.ax_density_x.set_xlabel('X (cm)')
-            self.ax_density_x.set_ylabel('Density')
             kde_x = gaussian_kde(x_vals, bw_method='scott')
             x_range = np.linspace(min(x_vals) - 10, max(x_vals) + 10, 1000)
             y_kde_x = kde_x(x_range)
             self.ax_density_x.plot(x_range, y_kde_x, color='blue', lw=2)
             self.ax_density_x.fill_between(x_range, y_kde_x, color='skyblue', alpha=0.5)
+            self.ax_density_x.set_title('X Coordinate Density')
+            self.ax_density_x.set_xlabel('X (cm)')
+            self.ax_density_x.set_ylabel('Density')
+            self.ax_density_x.grid(True)
 
-            # Y KDE
             self.ax_density_y.clear()
-            self.ax_density_y.set_title('Y Coordinate Density')
-            self.ax_density_y.set_xlabel('Y (cm)')
-            self.ax_density_y.set_ylabel('Density')
             kde_y = gaussian_kde(y_vals, bw_method='scott')
             y_range = np.linspace(min(y_vals) - 10, max(y_vals) + 10, 1000)
             y_kde_y = kde_y(y_range)
             self.ax_density_y.plot(y_range, y_kde_y, color='blue', lw=2)
             self.ax_density_y.fill_between(y_range, y_kde_y, color='skyblue', alpha=0.5)
+            self.ax_density_y.set_title('Y Coordinate Density')
+            self.ax_density_y.set_xlabel('Y (cm)')
+            self.ax_density_y.set_ylabel('Density')
+            self.ax_density_y.grid(True)
 
         self.fig_density.tight_layout()
         self.canvas_density.draw()
 
-    def avg_distance(self):
-        if self.distances:
-            return mean(self.distances)
-        return 1
+    def on_radius_change(self, *args):
+        try:
+            new_radius = float(self.radius_var.get())
+            if new_radius <= 0:
+                raise ValueError("Radius must be positive")
+            self.valid_radius = new_radius
+            self.update_metrics_and_visualization()
+        except ValueError:
+            self.radius_var.set(str(self.valid_radius))
 
     def on_prob_input_change(self, *args):
         self.calculate_probabilities()
