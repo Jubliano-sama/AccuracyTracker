@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from math import sqrt
 from statistics import mean, stdev
-from scipy.stats import binom, norm
+from scipy.stats import norm, chi2, binom
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -263,6 +263,15 @@ class ShotAccuracyApp:
         self.avg_coords = (avg_x, avg_y)
 
     def calculate_probabilities(self):
+        """
+        Updates labels for:
+        - Probability of one shot hitting (monte carlo estimate)
+        - Probability of reaching desired result (binomial)
+        - 95% CI bounds for binomial probability
+        - 50% CI bounds for binomial probability
+        using a parametric bootstrap approach.
+        """
+        # If we have no shots or no average coords, there's nothing to compute
         if not self.distances or not self.avg_coords:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
@@ -272,9 +281,12 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
+        # Parse the user inputs for binomial trials and hits
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
+
         if trials_str == "" or hits_str == "":
+            # Missing input => no calculation
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
             self.prob_lower_label.config(text="Lower Probability (95% confidence): N/A")
@@ -283,6 +295,7 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
+        # Validate that trials and hits are integers in correct ranges
         try:
             trials = int(trials_str)
             hits = int(hits_str)
@@ -297,6 +310,7 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): Invalid Input")
             return
 
+        # If std dev wasn't computed (e.g., only 1 shot in the dataset), we can't proceed
         if self.stdX_dev is None or self.stdY_dev is None:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
@@ -306,57 +320,104 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
+        # Gather the shot data in x_arr, y_arr for bootstrapping
+        shots = []
+        for item in self.tree.get_children():
+            x_val, y_val = self.tree.item(item)['values']
+            shots.append((float(x_val), float(y_val)))
+        arr = np.array(shots)
+        x_arr = arr[:, 0]
+        y_arr = arr[:, 1]
+        n_data = len(x_arr)
+
+        # Radius for a "hit"
         radius = self.valid_radius
 
-        # Calculate probabilities for X and Y bounds
-        prob_x = norm.cdf(self.X_mean + radius, loc=self.X_mean, scale=self.stdX_dev) - norm.cdf(self.X_mean - radius, loc=self.X_mean, scale=self.stdX_dev)
-        prob_y = norm.cdf(self.Y_mean + radius, loc=self.Y_mean, scale=self.stdY_dev) - norm.cdf(self.Y_mean - radius, loc=self.Y_mean, scale=self.stdY_dev)
-        prob_total = prob_x * prob_y
+        # ------------------------------------------------------------------
+        # 1) Single Monte Carlo estimate of probability for one shot hitting
+        # ------------------------------------------------------------------
+        n_mc = 10_000  # number of draws in MC
+        sim_x = np.random.normal(self.X_mean, self.stdX_dev, size=n_mc)
+        sim_y = np.random.normal(self.Y_mean, self.stdY_dev, size=n_mc)
+        dists = np.sqrt(sim_x**2 + sim_y**2)
 
-        # Binomial probability
-        prob_binom = 1 - binom.cdf(hits - 1, trials, prob_total)
+        # Probability that a single shot is within 'radius'
+        prob_hit_one_shot = np.mean(dists <= radius)
 
-        # 95% confidence bounds
-        z_95 = 1.96
-        lower_stdX_95 = self.stdX_dev + z_95 * self.stdX_error
-        lower_stdY_95 = self.stdY_dev + z_95 * self.stdY_error
-        lower_prob_x_95 = norm.cdf(self.X_mean + radius, self.X_mean, lower_stdX_95) - norm.cdf(self.X_mean - radius, self.X_mean, lower_stdX_95)
-        lower_prob_y_95 = norm.cdf(self.Y_mean + radius, self.Y_mean, lower_stdY_95) - norm.cdf(self.Y_mean - radius, self.Y_mean, lower_stdY_95)
-        lower_prob_total_95 = lower_prob_x_95 * lower_prob_y_95
+        # Binomial probability of getting at least `hits` successes in `trials`
+        prob_binom_center = 1 - binom.cdf(hits - 1, trials, prob_hit_one_shot)
 
-        higher_stdX_95 = max(0.01, self.stdX_dev - z_95 * self.stdX_error)
-        higher_stdY_95 = max(0.01, self.stdY_dev - z_95 * self.stdY_error)
-        higher_prob_x_95 = norm.cdf(self.X_mean + radius, self.X_mean, higher_stdX_95) - norm.cdf(self.X_mean - radius, self.X_mean, higher_stdX_95)
-        higher_prob_y_95 = norm.cdf(self.Y_mean + radius, self.Y_mean, higher_stdY_95) - norm.cdf(self.Y_mean - radius, self.Y_mean, higher_stdY_95)
-        higher_prob_total_95 = higher_prob_x_95 * higher_prob_y_95
+        # ------------------------------------------------------------------
+        # 2) Parametric Bootstrap to form distribution of binomial probabilities
+        # ------------------------------------------------------------------
+        n_boot = 1000
+        boot_binom_probs = []
 
-        prob_binom_lower_95 = 1 - binom.cdf(hits - 1, trials, lower_prob_total_95)
-        prob_binom_higher_95 = 1 - binom.cdf(hits - 1, trials, higher_prob_total_95)
+        for _ in range(n_boot):
+            # (a) Sample sigma_x_star from scaled chi-square
+            chi2_x = chi2.rvs(df=n_data - 1)
+            sigma_x_star_sq = (n_data - 1)*(self.stdX_dev**2)/chi2_x
+            sigma_x_star = np.sqrt(sigma_x_star_sq)
 
-        # 50% confidence bounds
-        z_50 = 0.6745
-        lower_stdX_50 = self.stdX_dev + z_50 * self.stdX_error
-        lower_stdY_50 = self.stdY_dev + z_50 * self.stdY_error
-        lower_prob_x_50 = norm.cdf(self.X_mean + radius, self.X_mean, lower_stdX_50) - norm.cdf(self.X_mean - radius, self.X_mean, lower_stdX_50)
-        lower_prob_y_50 = norm.cdf(self.Y_mean + radius, self.Y_mean, lower_stdY_50) - norm.cdf(self.Y_mean - radius, self.Y_mean, lower_stdY_50)
-        lower_prob_total_50 = lower_prob_x_50 * lower_prob_y_50
+            # (b) Sample mu_x_star from Normal( X_mean, sigma_x_star/sqrt(n_data) )
+            mu_x_star = np.random.normal(loc=self.X_mean,
+                                        scale=sigma_x_star / np.sqrt(n_data))
 
-        higher_stdX_50 = max(0.01, self.stdX_dev - z_50 * self.stdX_error)
-        higher_stdY_50 = max(0.01, self.stdY_dev - z_50 * self.stdY_error)
-        higher_prob_x_50 = norm.cdf(self.X_mean + radius, self.X_mean, higher_stdX_50) - norm.cdf(self.X_mean - radius, self.X_mean, higher_stdX_50)
-        higher_prob_y_50 = norm.cdf(self.Y_mean + radius, self.Y_mean, higher_stdY_50) - norm.cdf(self.Y_mean - radius, self.Y_mean, higher_stdY_50)
-        higher_prob_total_50 = higher_prob_x_50 * higher_prob_y_50
+            # (c) Sample sigma_y_star
+            chi2_y = chi2.rvs(df=n_data - 1)
+            sigma_y_star_sq = (n_data - 1)*(self.stdY_dev**2)/chi2_y
+            sigma_y_star = np.sqrt(sigma_y_star_sq)
 
-        prob_binom_lower_50 = 1 - binom.cdf(hits - 1, trials, lower_prob_total_50)
-        prob_binom_higher_50 = 1 - binom.cdf(hits - 1, trials, higher_prob_total_50)
+            # (d) Sample mu_y_star
+            mu_y_star = np.random.normal(loc=self.Y_mean,
+                                        scale=sigma_y_star / np.sqrt(n_data))
 
-        # Update labels
-        self.prob_xy_label.config(text=f"Probability of one shot hitting: {prob_total * 100:.2f}%")
-        self.prob_binomial_label.config(text=f"Probability of reaching desired result: {prob_binom * 100:.2f}%")
-        self.prob_lower_label.config(text=f"Lower Probability (95% confidence): {prob_binom_lower_95 * 100:.2f}%")
-        self.prob_higher_label.config(text=f"Higher Probability (95% confidence): {prob_binom_higher_95 * 100:.2f}%")
-        self.prob_lower_50_label.config(text=f"Lower Probability (50% confidence): {prob_binom_lower_50 * 100:.2f}%")
-        self.prob_higher_50_label.config(text=f"Higher Probability (50% confidence): {prob_binom_higher_50 * 100:.2f}%")
+            # (e) Monte Carlo to estimate prob of hitting
+            sim_x_star = np.random.normal(mu_x_star, sigma_x_star, size=n_mc)
+            sim_y_star = np.random.normal(mu_y_star, sigma_y_star, size=n_mc)
+            dist_star = np.sqrt(sim_x_star**2 + sim_y_star**2)
+            p_star = np.mean(dist_star <= radius)
+
+            # (f) Binomial probability for at least 'hits' in 'trials'
+            prob_binom_star = 1 - binom.cdf(hits - 1, trials, p_star)
+            boot_binom_probs.append(prob_binom_star)
+
+        boot_binom_probs = np.array(boot_binom_probs)
+
+        # Extract 95% CI => 2.5% and 97.5% percentiles
+        prob_binom_lower_95 = np.percentile(boot_binom_probs, 2.5)
+        prob_binom_higher_95 = np.percentile(boot_binom_probs, 97.5)
+
+        # Extract 50% CI => 25% and 75% percentiles
+        prob_binom_lower_50 = np.percentile(boot_binom_probs, 25)
+        prob_binom_higher_50 = np.percentile(boot_binom_probs, 75)
+
+        # ------------------------------------------------------------------
+        # 3) Update the GUI labels with our new results
+        # ------------------------------------------------------------------
+        self.prob_xy_label.config(
+            text=f"Probability of one shot hitting: {prob_hit_one_shot * 100:.2f}%"
+        )
+        self.prob_binomial_label.config(
+            text=f"Probability of reaching desired result: {prob_binom_center * 100:.2f}%"
+        )
+
+        # 95% CI (from bootstrap)
+        self.prob_lower_label.config(
+            text=f"Lower Probability (95% confidence): {prob_binom_lower_95 * 100:.2f}%"
+        )
+        self.prob_higher_label.config(
+            text=f"Higher Probability (95% confidence): {prob_binom_higher_95 * 100:.2f}%"
+        )
+
+        # 50% CI (from bootstrap)
+        self.prob_lower_50_label.config(
+            text=f"Lower Probability (50% confidence): {prob_binom_lower_50 * 100:.2f}%"
+        )
+        self.prob_higher_50_label.config(
+            text=f"Higher Probability (50% confidence): {prob_binom_higher_50 * 100:.2f}%"
+        )
+
 
     def export_to_excel(self):
         if not self.shots_data_available():
