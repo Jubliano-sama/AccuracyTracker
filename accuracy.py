@@ -99,14 +99,21 @@ class ShotAccuracyApp:
         self.rms_radial_label = tk.Label(self.metrics_frame, text="RMS Radial: N/A")
         self.rms_radial_label.grid(row=6, column=0, sticky='w', padx=10)
 
-        self.range_x_50_label = tk.Label(self.metrics_frame, text="50% X Half-Range: N/A")
+        self.range_x_50_label = tk.Label(self.metrics_frame, text="50% X Range: N/A")
         self.range_x_50_label.grid(row=7, column=0, sticky='w', padx=10)
 
-        self.range_y_50_label = tk.Label(self.metrics_frame, text="50% Y Half-Range: N/A")
+        self.range_y_50_label = tk.Label(self.metrics_frame, text="50% Y Range: N/A")
         self.range_y_50_label.grid(row=8, column=0, sticky='w', padx=10)
 
         self.cep_50_label = tk.Label(self.metrics_frame, text="CEP50 (radius): N/A")
         self.cep_50_label.grid(row=9, column=0, sticky='w', padx=10)
+
+        # --- NEW LABELS FOR CUMULATIVE ABS DISTANCE ---
+        self.cumulative_x_error_label = tk.Label(self.metrics_frame, text="Average absolute X: N/A")
+        self.cumulative_x_error_label.grid(row=10, column=0, sticky='w', padx=10)
+
+        self.cumulative_y_error_label = tk.Label(self.metrics_frame, text="Average absolute Y: N/A")
+        self.cumulative_y_error_label.grid(row=11, column=0, sticky='w', padx=10)
         # ---------------------------------------------------
 
         # Probability Inputs
@@ -253,9 +260,13 @@ class ShotAccuracyApp:
             self.rms_x_label.config(text="RMS X: N/A")
             self.rms_y_label.config(text="RMS Y: N/A")
             self.rms_radial_label.config(text="RMS Radial: N/A")
-            self.range_x_50_label.config(text="50% X Half-Range: N/A")
-            self.range_y_50_label.config(text="50% Y Half-Range: N/A")
+            self.range_x_50_label.config(text="50% X Range: N/A")
+            self.range_y_50_label.config(text="50% Y Range: N/A")
             self.cep_50_label.config(text="CEP50 (radius): N/A")
+
+            # Clear the new cumulative labels
+            self.cumulative_x_error_label.config(text="Average absolute X: N/A")
+            self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
 
             self.avg_coords = None
             self.distances = []
@@ -299,37 +310,37 @@ class ShotAccuracyApp:
             # NEW METRICS
             # ---------------------------
 
-            # RMS X (root-mean-square error in X)
-            # This differs slightly from stdev if you wanted sample vs. population, 
-            # but we'll treat it simply as the population RMS
+            # RMS X (population RMS)
             rms_x = np.sqrt(np.mean((np.array(x_vals) - avg_x)**2))
-
             # RMS Y
             rms_y = np.sqrt(np.mean((np.array(y_vals) - avg_y)**2))
-
             # RMS Radial
             rms_radial = np.sqrt(np.mean((np.array(distances))**2))
 
-            # 50% half-range in X
-            # -> The distance from the mean such that 50% of x-values 
-            # lie within +/- that offset. 
-            # We can do the median of abs(x - avg_x).
-            x_50_range = np.percentile(np.abs(np.array(x_vals) - avg_x), 50)
-
-            # 50% half-range in Y
-            y_50_range = np.percentile(np.abs(np.array(y_vals) - avg_y), 50)
-
-            # CEP50 => radius around (avg_x, avg_y) that encloses 50% of points
-            # i.e. median of the radial distances
+            # 50% range in X
+            x_50_range = 2 * np.percentile(np.abs(np.array(x_vals) - avg_x), 50)
+            # 50% range in Y
+            y_50_range = 2 * np.percentile(np.abs(np.array(y_vals) - avg_y), 50)
+            # CEP50 => median of radial distances
             cep_50 = np.percentile(distances, 50)
-            
-            # Display in UI
+
             self.rms_x_label.config(text=f"RMS X: {rms_x:.2f} cm")
             self.rms_y_label.config(text=f"RMS Y: {rms_y:.2f} cm")
             self.rms_radial_label.config(text=f"RMS Radial: {rms_radial:.2f} cm")
-            self.range_x_50_label.config(text=f"50% X Range: {x_50_range*2:.2f} cm")
-            self.range_y_50_label.config(text=f"50% Y Range: {y_50_range*2:.2f} cm")
+            self.range_x_50_label.config(text=f"50% X Range: {x_50_range:.2f} cm")
+            self.range_y_50_label.config(text=f"50% Y Range: {y_50_range:.2f} cm")
             self.cep_50_label.config(text=f"CEP50 (radius): {cep_50:.2f} cm")
+
+            # --- NEW: CUMULATIVE ABS DISTANCE FROM MEAN (X & Y) ---
+            cumulative_x_error = float(np.sum(np.abs(np.array(x_vals) - avg_x)))
+            cumulative_y_error = float(np.sum(np.abs(np.array(y_vals) - avg_y)))
+
+            self.cumulative_x_error_label.config(
+                text=f"Average absolute X: {cumulative_x_error/len(distances):.2f} cm"
+            )
+            self.cumulative_y_error_label.config(
+                text=f"Average absolute Y: {cumulative_y_error/len(distances):.2f} cm"
+            )
 
         else:
             # Only 1 shot => No standard deviation
@@ -344,9 +355,13 @@ class ShotAccuracyApp:
             self.rms_x_label.config(text="RMS X: N/A")
             self.rms_y_label.config(text="RMS Y: N/A")
             self.rms_radial_label.config(text="RMS Radial: N/A")
-            self.range_x_50_label.config(text="50% X Half-Range: N/A")
-            self.range_y_50_label.config(text="50% Y Half-Range: N/A")
+            self.range_x_50_label.config(text="50% X Range: N/A")
+            self.range_y_50_label.config(text="50% Y Range: N/A")
             self.cep_50_label.config(text="CEP50 (radius): N/A")
+
+            # Clear the new cumulative labels
+            self.cumulative_x_error_label.config(text="Average absolute X: N/A")
+            self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
 
         self.avg_coords = (avg_x, avg_y)
 
