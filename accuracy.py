@@ -61,11 +61,10 @@ class ShotAccuracyApp:
         self.remove_button = tk.Button(self.controls_frame, text="Remove Selected Shot", command=self.remove_shot)
         self.remove_button.grid(row=0, column=1, padx=5)
 
-        # Import from Excel Button
+        # Import/Export Buttons
         self.import_button = tk.Button(self.controls_frame, text="Import from Excel", command=self.import_from_excel)
         self.import_button.grid(row=0, column=2, padx=5)
 
-        # Export to Excel Button
         self.export_button = tk.Button(self.controls_frame, text="Export to Excel", command=self.export_to_excel)
         self.export_button.grid(row=0, column=3, padx=5)
 
@@ -80,14 +79,35 @@ class ShotAccuracyApp:
         self.avg_label = tk.Label(self.metrics_frame, text="Average Coordinates: N/A")
         self.avg_label.grid(row=0, column=0, sticky='w', padx=10)
 
-        self.accuracy_label = tk.Label(self.metrics_frame, text=f"Accuracy (within {self.valid_radius}cm): N/A")
+        self.accuracy_label = tk.Label(self.metrics_frame, 
+                                       text=f"Accuracy (within {self.valid_radius}cm): N/A")
         self.accuracy_label.grid(row=1, column=0, sticky='w', padx=10)
 
         self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
-        self.stdX_label.grid(row=3, column=0, sticky='w', padx=10)
+        self.stdX_label.grid(row=2, column=0, sticky='w', padx=10)
 
         self.stdY_label = tk.Label(self.metrics_frame, text="Standard Deviation Y: N/A")
-        self.stdY_label.grid(row=4, column=0, sticky='w', padx=10)
+        self.stdY_label.grid(row=3, column=0, sticky='w', padx=10)
+
+        # --- NEW METRIC LABELS FOR RMS, 50% RANGES, ETC. ---
+        self.rms_x_label = tk.Label(self.metrics_frame, text="RMS X: N/A")
+        self.rms_x_label.grid(row=4, column=0, sticky='w', padx=10)
+
+        self.rms_y_label = tk.Label(self.metrics_frame, text="RMS Y: N/A")
+        self.rms_y_label.grid(row=5, column=0, sticky='w', padx=10)
+
+        self.rms_radial_label = tk.Label(self.metrics_frame, text="RMS Radial: N/A")
+        self.rms_radial_label.grid(row=6, column=0, sticky='w', padx=10)
+
+        self.range_x_50_label = tk.Label(self.metrics_frame, text="50% X Half-Range: N/A")
+        self.range_x_50_label.grid(row=7, column=0, sticky='w', padx=10)
+
+        self.range_y_50_label = tk.Label(self.metrics_frame, text="50% Y Half-Range: N/A")
+        self.range_y_50_label.grid(row=8, column=0, sticky='w', padx=10)
+
+        self.cep_50_label = tk.Label(self.metrics_frame, text="CEP50 (radius): N/A")
+        self.cep_50_label.grid(row=9, column=0, sticky='w', padx=10)
+        # ---------------------------------------------------
 
         # Probability Inputs
         self.trials_label = tk.Label(self.prob_frame, text="Number of Trials:")
@@ -223,10 +243,20 @@ class ShotAccuracyApp:
             shots.append((float(x), float(y)))
 
         if not shots:
+            # No data => clear metrics
             self.avg_label.config(text="Average Coordinates: N/A")
             self.accuracy_label.config(text=f"Accuracy (within {self.valid_radius}cm): N/A")
             self.stdX_label.config(text="Standard Deviation X: N/A")
             self.stdY_label.config(text="Standard Deviation Y: N/A")
+
+            # Clear new metrics as well
+            self.rms_x_label.config(text="RMS X: N/A")
+            self.rms_y_label.config(text="RMS Y: N/A")
+            self.rms_radial_label.config(text="RMS Radial: N/A")
+            self.range_x_50_label.config(text="50% X Half-Range: N/A")
+            self.range_y_50_label.config(text="50% Y Half-Range: N/A")
+            self.cep_50_label.config(text="CEP50 (radius): N/A")
+
             self.avg_coords = None
             self.distances = []
             self.accuracy = None
@@ -234,42 +264,100 @@ class ShotAccuracyApp:
             self.total_shots = 0
             return
 
-        avg_x = mean([shot[0] for shot in shots])
-        avg_y = mean([shot[1] for shot in shots])
+        # Compute average
+        x_vals = [s[0] for s in shots]
+        y_vals = [s[1] for s in shots]
+        avg_x = mean(x_vals)
+        avg_y = mean(y_vals)
+
         self.avg_label.config(text=f"Average Coordinates: ({avg_x:.2f}, {avg_y:.2f}) cm")
 
-        distances = [sqrt((shot[0] - avg_x) ** 2 + (shot[1] - avg_y) ** 2) for shot in shots]
+        # Distances from the mean (radial)
+        distances = [sqrt((sx - avg_x)**2 + (sy - avg_y)**2) for sx, sy in shots]
         self.distances = distances
 
+        # "Accuracy" within self.valid_radius
         within_radius = sum(1 for d in distances if d <= self.valid_radius)
         self.accuracy = within_radius
         self.total_shots = len(shots)
         self.accuracy_label.config(text=f"Accuracy (within {self.valid_radius}cm): {within_radius} / {self.total_shots}")
 
+        # Standard Deviations for X and Y
         if len(distances) > 1:
-            self.stdX_dev = stdev(item[0] for item in shots)
-            self.X_mean = mean(item[0] for item in shots)
-            self.Y_mean = mean(item[1] for item in shots)
-            self.stdY_dev = stdev(item[1] for item in shots)
+            self.X_mean = avg_x
+            self.Y_mean = avg_y
+            self.stdX_dev = stdev(x_vals)
+            self.stdY_dev = stdev(y_vals)
             self.stdX_label.config(text=f"Standard Deviation X: {self.stdX_dev:.2f} cm")
             self.stdY_label.config(text=f"Standard Deviation Y: {self.stdY_dev:.2f} cm")
-            
+
+            # errors used in old code for confidence intervals
             self.stdX_error = self.stdX_dev / sqrt(2 * (len(distances) - 1))
             self.stdY_error = self.stdY_dev / sqrt(2 * (len(distances) - 1))
+
+            # ---------------------------
+            # NEW METRICS
+            # ---------------------------
+
+            # RMS X (root-mean-square error in X)
+            # This differs slightly from stdev if you wanted sample vs. population, 
+            # but we'll treat it simply as the population RMS
+            rms_x = np.sqrt(np.mean((np.array(x_vals) - avg_x)**2))
+
+            # RMS Y
+            rms_y = np.sqrt(np.mean((np.array(y_vals) - avg_y)**2))
+
+            # RMS Radial
+            rms_radial = np.sqrt(np.mean((np.array(distances))**2))
+
+            # 50% half-range in X
+            # -> The distance from the mean such that 50% of x-values 
+            # lie within +/- that offset. 
+            # We can do the median of abs(x - avg_x).
+            x_50_range = np.percentile(np.abs(np.array(x_vals) - avg_x), 50)
+
+            # 50% half-range in Y
+            y_50_range = np.percentile(np.abs(np.array(y_vals) - avg_y), 50)
+
+            # CEP50 => radius around (avg_x, avg_y) that encloses 50% of points
+            # i.e. median of the radial distances
+            cep_50 = np.percentile(distances, 50)
+            
+            # Display in UI
+            self.rms_x_label.config(text=f"RMS X: {rms_x:.2f} cm")
+            self.rms_y_label.config(text=f"RMS Y: {rms_y:.2f} cm")
+            self.rms_radial_label.config(text=f"RMS Radial: {rms_radial:.2f} cm")
+            self.range_x_50_label.config(text=f"50% X Range: {x_50_range*2:.2f} cm")
+            self.range_y_50_label.config(text=f"50% Y Range: {y_50_range*2:.2f} cm")
+            self.cep_50_label.config(text=f"CEP50 (radius): {cep_50:.2f} cm")
+
         else:
-            self.std_dev = None
+            # Only 1 shot => No standard deviation
+            self.stdX_dev = None
+            self.stdY_dev = None
+            self.X_mean = avg_x
+            self.Y_mean = avg_y
             self.stdX_label.config(text="Standard Deviation X: N/A")
             self.stdY_label.config(text="Standard Deviation Y: N/A")
+
+            # Clear new metrics
+            self.rms_x_label.config(text="RMS X: N/A")
+            self.rms_y_label.config(text="RMS Y: N/A")
+            self.rms_radial_label.config(text="RMS Radial: N/A")
+            self.range_x_50_label.config(text="50% X Half-Range: N/A")
+            self.range_y_50_label.config(text="50% Y Half-Range: N/A")
+            self.cep_50_label.config(text="CEP50 (radius): N/A")
 
         self.avg_coords = (avg_x, avg_y)
 
     def calculate_probabilities(self):
         """
         Updates labels for:
-        - Probability of one shot hitting (Monte Carlo estimate)
-        - Probability of reaching desired result (binomial)
-        - 95% CI bounds for binomial probability
-        - 50% CI bounds for binomial probability
+         - Probability of one shot hitting (Monte Carlo estimate)
+         - Probability of reaching desired result (binomial)
+         - 95% CI bounds for binomial probability
+         - 50% CI bounds for binomial probability
+
         using a parametric bootstrap approach,
         measuring distance from (X_mean, Y_mean).
         """
@@ -283,7 +371,7 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
-        # Parse user inputs for binomial trials & hits
+        # Parse user inputs
         trials_str = self.trials_var.get().strip()
         hits_str = self.hits_var.get().strip()
 
@@ -297,7 +385,6 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
-        # Validate that trials and hits are integers in correct ranges
         try:
             trials = int(trials_str)
             hits = int(hits_str)
@@ -312,7 +399,7 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): Invalid Input")
             return
 
-        # If std dev wasn't computed (e.g., only 1 shot), we can't proceed
+        # If std dev wasn't computed (e.g., only 1 shot in dataset)
         if self.stdX_dev is None or self.stdY_dev is None:
             self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
             self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
@@ -322,7 +409,7 @@ class ShotAccuracyApp:
             self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
             return
 
-        # Gather shot data in x_arr, y_arr for the bootstrap
+        # Gather shot data for bootstrap
         shots = []
         for item in self.tree.get_children():
             x_val, y_val = self.tree.item(item)['values']
@@ -335,79 +422,59 @@ class ShotAccuracyApp:
         # "hit" radius around the mean
         radius = self.valid_radius
 
-        # ------------------------------------------------------------------
         # 1) Single Monte Carlo estimate of probability for one shot hitting
-        #    - We sample from Normal(X_mean, stdX_dev), Normal(Y_mean, stdY_dev)
-        #    - Then measure distance from (X_mean, Y_mean)
-        # ------------------------------------------------------------------
         n_mc = 10_000
         sim_x = np.random.normal(self.X_mean, self.stdX_dev, size=n_mc)
         sim_y = np.random.normal(self.Y_mean, self.stdY_dev, size=n_mc)
 
-        # Distance from the sample mean
         dists = np.sqrt((sim_x - self.X_mean)**2 + (sim_y - self.Y_mean)**2)
         prob_hit_one_shot = np.mean(dists <= radius)
 
-        # Probability of at least `hits` successes in `trials`
+        # Binomial probability
         prob_binom_center = 1 - binom.cdf(hits - 1, trials, prob_hit_one_shot)
 
-        # ------------------------------------------------------------------
-        # 2) Parametric Bootstrap to form distribution of binomial probabilities
-        # ------------------------------------------------------------------
-        n_boot = 10000
+        # 2) Parametric Bootstrap
+        n_boot = 10_000
         boot_binom_probs = []
 
         for _ in range(n_boot):
-            # (a) Sample sigma_x_star from scaled chi-square
             chi2_x = chi2.rvs(df=n_data - 1)
-            sigma_x_star_sq = (n_data - 1) * (self.stdX_dev**2) / chi2_x
+            sigma_x_star_sq = (n_data - 1)*(self.stdX_dev**2)/chi2_x
             sigma_x_star = np.sqrt(sigma_x_star_sq)
 
-            # (b) Sample mu_x_star from Normal(X_mean, sigma_x_star / sqrt(n_data))
             mu_x_star = np.random.normal(loc=self.X_mean,
-                                        scale=sigma_x_star / np.sqrt(n_data))
+                                         scale=sigma_x_star / np.sqrt(n_data))
 
-            # (c) Sample sigma_y_star similarly
             chi2_y = chi2.rvs(df=n_data - 1)
-            sigma_y_star_sq = (n_data - 1) * (self.stdY_dev**2) / chi2_y
+            sigma_y_star_sq = (n_data - 1)*(self.stdY_dev**2)/chi2_y
             sigma_y_star = np.sqrt(sigma_y_star_sq)
 
-            # (d) Sample mu_y_star
             mu_y_star = np.random.normal(loc=self.Y_mean,
-                                        scale=sigma_y_star / np.sqrt(n_data))
+                                         scale=sigma_y_star / np.sqrt(n_data))
 
-            # (e) Monte Carlo: draw from Normal(mu_x_star, sigma_x_star),
-            #                  Normal(mu_y_star, sigma_y_star)
             sim_x_star = np.random.normal(mu_x_star, sigma_x_star, size=n_mc)
             sim_y_star = np.random.normal(mu_y_star, sigma_y_star, size=n_mc)
-
-            # Distance from the *bootstrapped* mean (mu_x_star, mu_y_star)
             dist_star = np.sqrt((sim_x_star - mu_x_star)**2 + (sim_y_star - mu_y_star)**2)
             p_star = np.mean(dist_star <= radius)
 
-            # Probability of at least `hits` in `trials`
             prob_binom_star = 1 - binom.cdf(hits - 1, trials, p_star)
             boot_binom_probs.append(prob_binom_star)
 
         boot_binom_probs = np.array(boot_binom_probs)
 
-        # 95% CI => 2.5% and 97.5% percentiles
         prob_binom_lower_95 = np.percentile(boot_binom_probs, 2.5)
         prob_binom_higher_95 = np.percentile(boot_binom_probs, 97.5)
-
-        # 50% CI => 25% and 75% percentiles
         prob_binom_lower_50 = np.percentile(boot_binom_probs, 25)
         prob_binom_higher_50 = np.percentile(boot_binom_probs, 75)
 
-        # ------------------------------------------------------------------
         # 3) Update GUI labels
-        # ------------------------------------------------------------------
         self.prob_xy_label.config(
             text=f"Probability of one shot hitting: {prob_hit_one_shot * 100:.2f}%"
         )
         self.prob_binomial_label.config(
             text=f"Probability of reaching desired result: {prob_binom_center * 100:.2f}%"
         )
+
         self.prob_lower_label.config(
             text=f"Lower Probability (95% confidence): {prob_binom_lower_95 * 100:.2f}%"
         )
@@ -421,18 +488,20 @@ class ShotAccuracyApp:
             text=f"Higher Probability (50% confidence): {prob_binom_higher_50 * 100:.2f}%"
         )
 
-
-
     def export_to_excel(self):
         if not self.shots_data_available():
             messagebox.showerror("No Data", "There is no data to export. Please add shots and calculate metrics first.")
             return
 
-        file_path = filedialog.asksaveasfilename(defaultextension='.xlsx', filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        file_path = filedialog.asksaveasfilename(
+            defaultextension='.xlsx', 
+            filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+        )
         if not file_path:
             return
 
-        data = [(float(self.tree.item(item)['values'][0]), float(self.tree.item(item)['values'][1])) for item in self.tree.get_children()]
+        data = [(float(self.tree.item(item)['values'][0]),
+                 float(self.tree.item(item)['values'][1])) for item in self.tree.get_children()]
         df_shots = pd.DataFrame(data, columns=['X (cm)', 'Y (cm)'])
 
         try:
@@ -504,8 +573,11 @@ class ShotAccuracyApp:
             self.ax_vis.scatter(x_vals, y_vals, c='blue', label='Shots')
 
             if self.avg_coords:
-                self.ax_vis.scatter(self.avg_coords[0], self.avg_coords[1], c='green', marker='x', s=100, label='Center')
-                circle = Circle(self.avg_coords, self.valid_radius, color='red', fill=False, linestyle='--', label=f'{self.valid_radius}cm Radius')
+                self.ax_vis.scatter(self.avg_coords[0], self.avg_coords[1],
+                                    c='green', marker='x', s=100, label='Center')
+                circle = Circle(self.avg_coords, self.valid_radius, color='red',
+                                fill=False, linestyle='--',
+                                label=f'{self.valid_radius}cm Radius')
                 self.ax_vis.add_patch(circle)
 
             self.ax_vis.legend()
