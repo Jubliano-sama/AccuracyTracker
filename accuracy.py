@@ -116,6 +116,17 @@ class ShotAccuracyApp:
         self.cumulative_y_error_label.grid(row=11, column=0, sticky='w', padx=10)
         # ---------------------------------------------------
 
+        # --- NEW LABELS FOR CEP100 AND 100% RANGES ---
+        self.cep_100_label = tk.Label(self.metrics_frame, text="CEP100 (radius): N/A")
+        self.cep_100_label.grid(row=12, column=0, sticky='w', padx=10)
+
+        self.range_x_100_label = tk.Label(self.metrics_frame, text="100% X Range: N/A")
+        self.range_x_100_label.grid(row=13, column=0, sticky='w', padx=10)
+
+        self.range_y_100_label = tk.Label(self.metrics_frame, text="100% Y Range: N/A")
+        self.range_y_100_label.grid(row=14, column=0, sticky='w', padx=10)
+        # ---------------------------------------------------
+
         # Probability Inputs
         self.trials_label = tk.Label(self.prob_frame, text="Number of Trials:")
         self.trials_label.grid(row=0, column=0, sticky='e', padx=5, pady=5)
@@ -264,9 +275,14 @@ class ShotAccuracyApp:
             self.range_y_50_label.config(text="50% Y Range: N/A")
             self.cep_50_label.config(text="CEP50 (radius): N/A")
 
-            # Clear the new cumulative labels
+            # Clear cumulative labels
             self.cumulative_x_error_label.config(text="Average absolute X: N/A")
             self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
+
+            # Clear newly added labels
+            self.cep_100_label.config(text="CEP100 (radius): N/A")
+            self.range_x_100_label.config(text="100% X Range: N/A")
+            self.range_y_100_label.config(text="100% Y Range: N/A")
 
             self.avg_coords = None
             self.distances = []
@@ -321,6 +337,7 @@ class ShotAccuracyApp:
             x_50_range = 2 * np.percentile(np.abs(np.array(x_vals) - avg_x), 50)
             # 50% range in Y
             y_50_range = 2 * np.percentile(np.abs(np.array(y_vals) - avg_y), 50)
+
             # CEP50 => median of radial distances
             cep_50 = np.percentile(distances, 50)
 
@@ -331,7 +348,7 @@ class ShotAccuracyApp:
             self.range_y_50_label.config(text=f"50% Y Range: {y_50_range:.2f} cm")
             self.cep_50_label.config(text=f"CEP50 (radius): {cep_50:.2f} cm")
 
-            # --- NEW: CUMULATIVE ABS DISTANCE FROM MEAN (X & Y) ---
+            # Cumulative absolute error from mean
             cumulative_x_error = float(np.sum(np.abs(np.array(x_vals) - avg_x)))
             cumulative_y_error = float(np.sum(np.abs(np.array(y_vals) - avg_y)))
 
@@ -341,6 +358,16 @@ class ShotAccuracyApp:
             self.cumulative_y_error_label.config(
                 text=f"Average absolute Y: {cumulative_y_error/len(distances):.2f} cm"
             )
+
+            # CEP100 (max radial distance)
+            cep_100 = max(distances)
+            # 100% ranges (min->max in X and Y)
+            range_x_100 = max(x_vals) - min(x_vals)
+            range_y_100 = max(y_vals) - min(y_vals)
+
+            self.cep_100_label.config(text=f"CEP100 (radius): {cep_100:.2f} cm")
+            self.range_x_100_label.config(text=f"100% X Range: {range_x_100:.2f} cm")
+            self.range_y_100_label.config(text=f"100% Y Range: {range_y_100:.2f} cm")
 
         else:
             # Only 1 shot => No standard deviation
@@ -358,10 +385,13 @@ class ShotAccuracyApp:
             self.range_x_50_label.config(text="50% X Range: N/A")
             self.range_y_50_label.config(text="50% Y Range: N/A")
             self.cep_50_label.config(text="CEP50 (radius): N/A")
-
-            # Clear the new cumulative labels
             self.cumulative_x_error_label.config(text="Average absolute X: N/A")
             self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
+
+            # Clear newly added labels
+            self.cep_100_label.config(text="CEP100 (radius): N/A")
+            self.range_x_100_label.config(text="100% X Range: N/A")
+            self.range_y_100_label.config(text="100% Y Range: N/A")
 
         self.avg_coords = (avg_x, avg_y)
 
