@@ -12,7 +12,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import numpy as np
 
 ###############################################################################
-# 1) ShotsData: a “logic” class that holds shot data & performs all calculations
+# 1) ShotsData: a logic class that holds shot data & performs all calculations
 ###############################################################################
 
 class ShotsData:
@@ -44,19 +44,19 @@ class ShotsData:
         self.prob_binomial_higher_95 = None
         self.prob_binomial_lower_50 = None
         self.prob_binomial_higher_50 = None
-    
+
     def add_shot(self, x, y):
         self.shots.append((float(x), float(y)))
-    
+
     def remove_shot(self, index):
         """Remove shot by list index (0-based)."""
         if 0 <= index < len(self.shots):
             del self.shots[index]
-    
+
     def list_shots(self):
         """Return list of all shots as (index, x, y)."""
         return [(i, s[0], s[1]) for i, s in enumerate(self.shots)]
-    
+
     def import_from_excel(self, path):
         """Load shots from an Excel file with columns 'X (cm)' and 'Y (cm)'."""
         df_shots = pd.read_excel(path)
@@ -67,7 +67,7 @@ class ShotsData:
             x = float(row['X (cm)'])
             y = float(row['Y (cm)'])
             self.shots.append((x, y))
-    
+
     def export_to_excel(self, path):
         """Save current shots to an Excel file with columns 'X (cm)', 'Y (cm)'."""
         if not self.shots:
@@ -75,22 +75,22 @@ class ShotsData:
         df_shots = pd.DataFrame(self.shots, columns=['X (cm)', 'Y (cm)'])
         with pd.ExcelWriter(path) as writer:
             df_shots.to_excel(writer, sheet_name='Shots', index=False)
-    
+
     def set_radius(self, radius):
         if radius <= 0:
             raise ValueError("Radius must be positive.")
         self.valid_radius = float(radius)
-    
+
     def set_trials(self, trials):
         if trials < 0:
             raise ValueError("Trials must be >= 0.")
         self.trials = trials
-    
+
     def set_hits(self, hits):
         if hits < 0:
             raise ValueError("Hits must be >= 0.")
         self.hits = hits
-    
+
     def calculate_metrics(self):
         """Compute all the basic metrics: average, std dev, accuracy, etc."""
         if not self.shots:
@@ -127,7 +127,6 @@ class ShotsData:
             self.stdY_dev = stdev(y_vals)
             self.X_mean = avg_x
             self.Y_mean = avg_y
-            # For older usage
             n = len(self.shots)
             self.stdX_error = self.stdX_dev / sqrt(2 * (n - 1))
             self.stdY_error = self.stdY_dev / sqrt(2 * (n - 1))
@@ -138,80 +137,175 @@ class ShotsData:
             self.Y_mean = avg_y
             self.stdX_error = None
             self.stdY_error = None
-    
-    def calculate_probabilities(self):
-        """
-        Compute all probability & confidence interval metrics
-        based on self.trials and self.hits (if set).
-        """
+
+    def reset_probability_results(self):
         self.prob_hit_one_shot = None
         self.prob_binomial = None
         self.prob_binomial_lower_95 = None
         self.prob_binomial_higher_95 = None
         self.prob_binomial_lower_50 = None
         self.prob_binomial_higher_50 = None
-        
-        # If no shots or only 1 shot => we can't do meaningful stdev-based simulation
-        if (not self.shots) or (self.stdX_dev is None or self.stdY_dev is None):
-            return
+
+    def can_compute_probabilities(self):
+        # We need at least 2 shots for a meaningful stdev, and trials/hits must be set.
+        if not self.shots or (self.stdX_dev is None or self.stdY_dev is None):
+            return False
         if self.trials is None or self.hits is None:
-            return
-        
-        # "hit" radius
-        radius = self.valid_radius
-        
-        # Single Monte Carlo estimate
-        n_mc = 10_000
+            return False
+        return True
+
+    def compute_single_monte_carlo_estimate(self, n_mc=10000):
+        # This returns the approximate probability of hitting within self.valid_radius.
         sim_x = np.random.normal(self.X_mean, self.stdX_dev, size=n_mc)
         sim_y = np.random.normal(self.Y_mean, self.stdY_dev, size=n_mc)
-        
         dists = np.sqrt((sim_x - self.X_mean)**2 + (sim_y - self.Y_mean)**2)
-        prob_hit_one_shot = np.mean(dists <= radius)
-        self.prob_hit_one_shot = prob_hit_one_shot
-        
-        # Probability of >= hits in binomial
-        trials = self.trials
-        hits = self.hits
-        prob_binom_center = 1 - binom.cdf(hits - 1, trials, prob_hit_one_shot)
-        self.prob_binomial = prob_binom_center
-        
-        # Parametric bootstrap for confidence intervals
+        prob_hit = np.mean(dists <= self.valid_radius)
+        return prob_hit
+
+    def compute_parametric_bootstrap_ci(self, prob_hit_one_shot, n_boot=10000):
+        # Produces arrays of binomial probabilities for bootstrapping.
         shots_arr = np.array(self.shots)
         n_data = len(shots_arr)
-        
-        n_boot = 10_000
         boot_binom_probs = []
         
         for _ in range(n_boot):
-            # X dimension
             chi2_x = chi2.rvs(df=n_data - 1)
             sigma_x_star_sq = (n_data - 1)*(self.stdX_dev**2)/chi2_x
             sigma_x_star = np.sqrt(sigma_x_star_sq)
-            mu_x_star = np.random.normal(loc=self.X_mean, scale=sigma_x_star / np.sqrt(n_data))
-            
-            # Y dimension
+            mu_x_star = np.random.normal(loc=self.X_mean,
+                                         scale=sigma_x_star / np.sqrt(n_data))
+
             chi2_y = chi2.rvs(df=n_data - 1)
             sigma_y_star_sq = (n_data - 1)*(self.stdY_dev**2)/chi2_y
             sigma_y_star = np.sqrt(sigma_y_star_sq)
-            mu_y_star = np.random.normal(loc=self.Y_mean, scale=sigma_y_star / np.sqrt(n_data))
-            
-            # Sim
-            sim_x_star = np.random.normal(mu_x_star, sigma_x_star, size=n_mc)
-            sim_y_star = np.random.normal(mu_y_star, sigma_y_star, size=n_mc)
+            mu_y_star = np.random.normal(loc=self.Y_mean,
+                                         scale=sigma_y_star / np.sqrt(n_data))
+
+            sim_x_star = np.random.normal(mu_x_star, sigma_x_star, size=10000)
+            sim_y_star = np.random.normal(mu_y_star, sigma_y_star, size=10000)
             dist_star = np.sqrt((sim_x_star - mu_x_star)**2 + (sim_y_star - mu_y_star)**2)
-            p_star = np.mean(dist_star <= radius)
-            
-            prob_binom_star = 1 - binom.cdf(hits - 1, trials, p_star)
+            p_star = np.mean(dist_star <= self.valid_radius)
+
+            prob_binom_star = 1 - binom.cdf(self.hits - 1, self.trials, p_star)
             boot_binom_probs.append(prob_binom_star)
-        
+
         boot_binom_probs = np.array(boot_binom_probs)
-        self.prob_binomial_lower_95 = np.percentile(boot_binom_probs, 2.5)
-        self.prob_binomial_higher_95 = np.percentile(boot_binom_probs, 97.5)
-        self.prob_binomial_lower_50 = np.percentile(boot_binom_probs, 25)
-        self.prob_binomial_higher_50 = np.percentile(boot_binom_probs, 75)
+        return (
+            np.percentile(boot_binom_probs, 2.5),   # lower_95
+            np.percentile(boot_binom_probs, 97.5),  # higher_95
+            np.percentile(boot_binom_probs, 25),    # lower_50
+            np.percentile(boot_binom_probs, 75)     # higher_50
+        )
+
+    def calculate_probabilities(self):
+        """
+        Compute all probability & confidence interval metrics
+        based on self.trials and self.hits (if set).
+        """
+        self.reset_probability_results()
+        
+        # Check if we have enough data to compute.
+        if not self.can_compute_probabilities():
+            return
+        
+        # Single Monte Carlo estimate
+        prob_hit_one_shot = self.compute_single_monte_carlo_estimate()
+        self.prob_hit_one_shot = prob_hit_one_shot
+
+        # Probability of >= hits in binomial
+        prob_binom_center = 1 - binom.cdf(self.hits - 1, self.trials, prob_hit_one_shot)
+        self.prob_binomial = prob_binom_center
+
+        # Parametric bootstrap for confidence intervals
+        (low_95, high_95, low_50, high_50) = self.compute_parametric_bootstrap_ci(prob_hit_one_shot)
+        self.prob_binomial_lower_95 = low_95
+        self.prob_binomial_higher_95 = high_95
+        self.prob_binomial_lower_50 = low_50
+        self.prob_binomial_higher_50 = high_50
+
 
 ###############################################################################
-# 2) The GUI class (mostly your original code, but uses ShotsData internally)
+# 1.5) Compare two datasets subtool (logic)
+###############################################################################
+
+def compare_datasets(dataA, dataB, n_boot=10000, mc_size=10000):
+    """
+    Compare two ShotsData-like objects (dataA, dataB),
+    returning the probability that A has a higher 'hit probability'
+    than B by parametric bootstrap.
+
+    For each dataset:
+       - We resample (parametric) the means/stdevs
+       - Then do a short Monte Carlo to estimate p(hit)
+    We count how many times pA > pB.
+    """
+    # Check each dataset has at least 2 shots => std dev available
+    if dataA.stdX_dev is None or dataA.stdY_dev is None:
+        raise ValueError("Dataset A does not have enough shots for stdev (need >= 2).")
+    if dataB.stdX_dev is None or dataB.stdY_dev is None:
+        raise ValueError("Dataset B does not have enough shots for stdev (need >= 2).")
+
+    shotsA = np.array(dataA.shots)
+    nA = len(shotsA)
+    shotsB = np.array(dataB.shots)
+    nB = len(shotsB)
+
+    countA_better = 0
+
+    for _ in range(n_boot):
+        # Param sample for A
+        chi2_xA = chi2.rvs(df=nA - 1)
+        sigma_xA_star_sq = (nA - 1)*(dataA.stdX_dev**2)/chi2_xA
+        sigma_xA_star = np.sqrt(sigma_xA_star_sq)
+        mu_xA_star = np.random.normal(
+            loc=dataA.X_mean,
+            scale=sigma_xA_star / np.sqrt(nA)
+        )
+
+        chi2_yA = chi2.rvs(df=nA - 1)
+        sigma_yA_star_sq = (nA - 1)*(dataA.stdY_dev**2)/chi2_yA
+        sigma_yA_star = np.sqrt(sigma_yA_star_sq)
+        mu_yA_star = np.random.normal(
+            loc=dataA.Y_mean,
+            scale=sigma_yA_star / np.sqrt(nA)
+        )
+
+        sim_xA = np.random.normal(mu_xA_star, sigma_xA_star, size=mc_size)
+        sim_yA = np.random.normal(mu_yA_star, sigma_yA_star, size=mc_size)
+        distA = np.sqrt((sim_xA - mu_xA_star)**2 + (sim_yA - mu_yA_star)**2)
+        pA_star = np.mean(distA <= dataA.valid_radius)
+
+        # Param sample for B
+        chi2_xB = chi2.rvs(df=nB - 1)
+        sigma_xB_star_sq = (nB - 1)*(dataB.stdX_dev**2)/chi2_xB
+        sigma_xB_star = np.sqrt(sigma_xB_star_sq)
+        mu_xB_star = np.random.normal(
+            loc=dataB.X_mean,
+            scale=sigma_xB_star / np.sqrt(nB)
+        )
+
+        chi2_yB = chi2.rvs(df=nB - 1)
+        sigma_yB_star_sq = (nB - 1)*(dataB.stdY_dev**2)/chi2_yB
+        sigma_yB_star = np.sqrt(sigma_yB_star_sq)
+        mu_yB_star = np.random.normal(
+            loc=dataB.Y_mean,
+            scale=sigma_yB_star / np.sqrt(nB)
+        )
+
+        sim_xB = np.random.normal(mu_xB_star, sigma_xB_star, size=mc_size)
+        sim_yB = np.random.normal(mu_yB_star, sigma_yB_star, size=mc_size)
+        distB = np.sqrt((sim_xB - mu_xB_star)**2 + (sim_yB - mu_yB_star)**2)
+        pB_star = np.mean(distB <= dataB.valid_radius)
+
+        if pA_star > pB_star:
+            countA_better += 1
+
+    fraction = countA_better / n_boot
+    return fraction
+
+
+###############################################################################
+# 2) The GUI class (with a second tab for comparing two datasets)
 ###############################################################################
 
 class ShotAccuracyApp:
@@ -220,33 +314,73 @@ class ShotAccuracyApp:
         master.title("Shot Accuracy Calculator")
         master.geometry("1600x800")
         
-        # Now keep a ShotsData instance for the logic
+        # Create a Notebook for multiple tabs
+        self.notebook = ttk.Notebook(master)
+        self.notebook.pack(fill='both', expand=True)
+
+        # -----------------
+        # MAIN CALCULATOR TAB
+        # -----------------
+        self.main_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.main_tab, text="Main Calculator")
+
         self.data = ShotsData(radius=15.0)
-        
+
         # Tkinter Variables
         self.trials_var = tk.StringVar()
         self.hits_var = tk.StringVar()
         self.radius_var = tk.StringVar(value=str(self.data.valid_radius))
-        
-        # Create frames
-        self.input_frame = tk.Frame(master)
+
+        # Frames inside main tab
+        self.input_frame = tk.Frame(self.main_tab)
         self.input_frame.pack(pady=10, padx=10, fill=tk.X)
 
-        self.controls_frame = tk.Frame(master)
+        self.controls_frame = tk.Frame(self.main_tab)
         self.controls_frame.pack(pady=10, padx=10, fill=tk.X)
 
-        self.metrics_frame = tk.Frame(master)
+        self.metrics_frame = tk.Frame(self.main_tab)
         self.metrics_frame.pack(pady=10, padx=10, fill=tk.X)
 
-        self.prob_frame = tk.Frame(master)
+        self.prob_frame = tk.Frame(self.main_tab)
         self.prob_frame.pack(pady=10, padx=10, fill=tk.X)
 
-        self.plots_frame = tk.Frame(master)
+        self.plots_frame = tk.Frame(self.main_tab)
         self.plots_frame.pack(pady=10, padx=10, fill=tk.BOTH, expand=True)
 
-        # Treeview for shots
         self.create_shot_entries()
+        self.create_main_controls()
+        self.setup_visualization_plot()
 
+        # -----------------
+        # COMPARISON TAB
+        # -----------------
+        self.compare_tab = tk.Frame(self.notebook)
+        self.notebook.add(self.compare_tab, text="Compare Datasets")
+
+        self.compare_dataA = None
+        self.compare_dataB = None
+        self.build_compare_ui(self.compare_tab)
+
+    # ----------------------------------------------------------------
+    # MAIN TAB (exactly your original approach) 
+    # ----------------------------------------------------------------
+    def create_shot_entries(self):
+        columns = ('#1', '#2')
+        self.tree = ttk.Treeview(self.input_frame, columns=columns, show='headings', height=10)
+        self.tree.heading('#1', text='X (cm)')
+        self.tree.heading('#2', text='Y (cm)')
+        self.tree.column('#1', width=100, anchor='center')
+        self.tree.column('#2', width=100, anchor='center')
+        self.tree.pack(side='left', fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(self.input_frame, orient=tk.VERTICAL, command=self.tree.yview)
+        self.tree.configure(yscroll=scrollbar.set)
+        scrollbar.pack(side='right', fill='y')
+
+        self.tree.bind('<ButtonRelease-1>', self.on_shot_change)
+        self.tree.bind('<KeyRelease>', self.on_shot_change)
+
+    def create_main_controls(self):
         # Add & Remove
         self.add_button = tk.Button(self.controls_frame, text="Add Shot", command=self.add_shot)
         self.add_button.grid(row=0, column=0, padx=5)
@@ -272,7 +406,8 @@ class ShotAccuracyApp:
         self.avg_label = tk.Label(self.metrics_frame, text="Average Coordinates: N/A")
         self.avg_label.grid(row=0, column=0, sticky='w', padx=10)
 
-        self.accuracy_label = tk.Label(self.metrics_frame, text=f"Accuracy (within {self.data.valid_radius}cm): N/A")
+        self.accuracy_label = tk.Label(self.metrics_frame, 
+                                       text=f"Accuracy (within {self.data.valid_radius}cm): N/A")
         self.accuracy_label.grid(row=1, column=0, sticky='w', padx=10)
 
         self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
@@ -348,24 +483,14 @@ class ShotAccuracyApp:
         self.hits_var.trace_add('write', self.on_prob_input_change)
         self.radius_var.trace_add('write', self.on_radius_change)
 
-        # Plots
-        self.setup_visualization_plot()
-    
-    def create_shot_entries(self):
-        columns = ('#1', '#2')
-        self.tree = ttk.Treeview(self.input_frame, columns=columns, show='headings', height=10)
-        self.tree.heading('#1', text='X (cm)')
-        self.tree.heading('#2', text='Y (cm)')
-        self.tree.column('#1', width=100, anchor='center')
-        self.tree.column('#2', width=100, anchor='center')
-        self.tree.pack(side='left', fill=tk.BOTH, expand=True)
-
-        scrollbar = ttk.Scrollbar(self.input_frame, orient=tk.VERTICAL, command=self.tree.yview)
-        self.tree.configure(yscroll=scrollbar.set)
-        scrollbar.pack(side='right', fill='y')
-
-        self.tree.bind('<ButtonRelease-1>', self.on_shot_change)
-        self.tree.bind('<KeyRelease>', self.on_shot_change)
+    def on_shot_change(self, event):
+        # Rebuild shots from the tree
+        new_shots = []
+        for item in self.tree.get_children():
+            x, y = self.tree.item(item)['values']
+            new_shots.append((float(x), float(y)))
+        self.data.shots = new_shots
+        self.update_metrics_and_visualization()
 
     def add_shot(self):
         add_window = tk.Toplevel(self.master)
@@ -390,9 +515,7 @@ class ShotAccuracyApp:
             try:
                 x_val = float(x_str)
                 y_val = float(y_str)
-                # Add to data
                 self.data.add_shot(x_val, y_val)
-                # Add to tree
                 self.tree.insert('', 'end', values=(x_val, y_val))
                 add_window.destroy()
                 self.update_metrics_and_visualization()
@@ -434,7 +557,7 @@ class ShotAccuracyApp:
             messagebox.showerror("No Data", "No data to export.")
             return
         file_path = filedialog.asksaveasfilename(
-            defaultextension='.xlsx',
+            defaultextension='.xlsx', 
             filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
         )
         if not file_path:
@@ -445,28 +568,10 @@ class ShotAccuracyApp:
         except Exception as e:
             messagebox.showerror("Export Error", f"An error occurred while exporting: {e}")
 
-    def on_shot_change(self, event):
-        """
-        Whenever user edits the tree directly (though your code doesn’t show
-        cell-edit in place, you might have a plugin or future extension),
-        re-sync ShotsData from tree. Then recalc.
-        """
-        # Rebuild shots from the tree
-        new_shots = []
-        for item in self.tree.get_children():
-            x, y = self.tree.item(item)['values']
-            new_shots.append((float(x), float(y)))
-        self.data.shots = new_shots
-        self.update_metrics_and_visualization()
-
     def update_metrics_and_visualization(self):
-        # 1) Recalculate metrics
         self.data.calculate_metrics()
-        # 2) Probability calculations
         self.data.calculate_probabilities()
-        # 3) Update metric labels
         self.update_metric_labels()
-        # 4) Update plots
         self.update_visualization()
 
     def update_metric_labels(self):
@@ -510,6 +615,7 @@ class ShotAccuracyApp:
         if len(distances) > 1:
             x_vals = [s[0] for s in self.data.shots]
             y_vals = [s[1] for s in self.data.shots]
+
             # RMS X
             rms_x = np.sqrt(np.mean((np.array(x_vals) - avg_x)**2))
             rms_y = np.sqrt(np.mean((np.array(y_vals) - avg_y)**2))
@@ -589,11 +695,9 @@ class ShotAccuracyApp:
             self.data.set_radius(new_radius)
             self.update_metrics_and_visualization()
         except ValueError:
-            # revert
             self.radius_var.set(str(self.data.valid_radius))
 
     def on_prob_input_change(self, *args):
-        # parse the user’s typed values for trials/hits
         try:
             t = int(self.trials_var.get().strip())
         except:
@@ -641,6 +745,7 @@ class ShotAccuracyApp:
         self.ax_density_x.set_xlabel('X (cm)')
         self.ax_density_x.set_ylabel('Density')
         self.ax_density_x.grid(True)
+
         self.ax_density_y.set_title('Y Coordinate Density')
         self.ax_density_y.set_xlabel('Y (cm)')
         self.ax_density_y.set_ylabel('Density')
@@ -666,8 +771,8 @@ class ShotAccuracyApp:
             if self.data.avg_coords:
                 avg_x, avg_y = self.data.avg_coords
                 self.ax_vis.scatter(avg_x, avg_y, c='green', marker='x', s=100, label='Center')
-                circle = Circle((avg_x, avg_y), self.data.valid_radius, color='red',
-                                fill=False, linestyle='--',
+                circle = Circle((avg_x, avg_y), self.data.valid_radius,
+                                color='red', fill=False, linestyle='--',
                                 label=f'{self.data.valid_radius}cm Radius')
                 self.ax_vis.add_patch(circle)
 
@@ -719,6 +824,71 @@ class ShotAccuracyApp:
         self.fig_density.tight_layout()
         self.canvas_density.draw()
 
+    # ----------------------------------------------------------------
+    # SECOND TAB: Compare Two Datasets
+    # ----------------------------------------------------------------
+
+    def build_compare_ui(self, parent):
+        """Sets up the tab that allows comparing two data sets."""
+        tk.Label(parent, text="Dataset A:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        self.labelA = tk.Label(parent, text="(no file loaded)")
+        self.labelA.grid(row=0, column=1, sticky='w', padx=5, pady=5)
+        tk.Button(parent, text="Load A", command=self.on_load_A).grid(row=0, column=2, padx=5, pady=5)
+
+        tk.Label(parent, text="Dataset B:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        self.labelB = tk.Label(parent, text="(no file loaded)")
+        self.labelB.grid(row=1, column=1, sticky='w', padx=5, pady=5)
+        tk.Button(parent, text="Load B", command=self.on_load_B).grid(row=1, column=2, padx=5, pady=5)
+
+        tk.Button(parent, text="Compare", command=self.on_compare).grid(row=2, column=0, columnspan=3, pady=10)
+
+        self.compare_result_label = tk.Label(parent, text="Probability A > B: N/A")
+        self.compare_result_label.grid(row=3, column=0, columnspan=3, padx=10, pady=10)
+
+    def on_load_A(self):
+        path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        if not path:
+            return
+        dsA = ShotsData()
+        try:
+            dsA.import_from_excel(path)
+            dsA.calculate_metrics()
+            # require at least 2 shots
+            if dsA.stdX_dev is None or dsA.stdY_dev is None:
+                raise ValueError("Not enough shots to compute stdev in dataset A.")
+            self.compare_dataA = dsA
+            self.labelA.config(text=path)
+        except Exception as e:
+            messagebox.showerror("Error loading A", str(e))
+
+    def on_load_B(self):
+        path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
+        if not path:
+            return
+        dsB = ShotsData()
+        try:
+            dsB.import_from_excel(path)
+            dsB.calculate_metrics()
+            if dsB.stdX_dev is None or dsB.stdY_dev is None:
+                raise ValueError("Not enough shots to compute stdev in dataset B.")
+            self.compare_dataB = dsB
+            self.labelB.config(text=path)
+        except Exception as e:
+            messagebox.showerror("Error loading B", str(e))
+
+    def on_compare(self):
+        if not self.compare_dataA or not self.compare_dataB:
+            messagebox.showwarning("Missing data", "Please load both dataset A and B first.")
+            return
+        try:
+            frac = compare_datasets(self.compare_dataA, self.compare_dataB,
+                                    n_boot=10000, mc_size=10000)
+            pct = frac * 100
+            self.compare_result_label.config(text=f"Probability A > B: {pct:.2f}%")
+        except Exception as e:
+            messagebox.showerror("Comparison Error", str(e))
+
+
 ###############################################################################
 # 3) CLI mode: text-based commands to do the same add/list/remove/import/export
 ###############################################################################
@@ -740,6 +910,7 @@ def cli_mode():
         print("  set hits <N>            Set number of hits")
         print("  calc                    Calculate all metrics & probabilities")
         print("  metrics                 Print out the latest metrics")
+        print("  compare <A.xlsx> <B.xlsx>  Compare two data sets (A > B?)")
         print("  exit                    Quit the program")
 
     def do_list():
@@ -835,8 +1006,7 @@ def cli_mode():
         print("Metrics & probabilities recalculated. Use 'metrics' to view.")
     
     def do_metrics():
-        """Print out the main metrics from ShotsData."""
-        data.calculate_metrics()  # in case not done
+        data.calculate_metrics()
         data.calculate_probabilities()
         
         if not data.shots:
@@ -848,13 +1018,36 @@ def cli_mode():
         print(f"Shots within radius {data.valid_radius}cm: {data.accuracy} / {data.total_shots}")
         print(f"Std dev X={data.stdX_dev}, Y={data.stdY_dev}")
         
-        # We won’t replicate absolutely all, but you can adapt as needed
         if data.prob_hit_one_shot is not None:
             print(f"Probability of 1 shot hitting: {data.prob_hit_one_shot*100:.2f}%")
         if data.prob_binomial is not None:
             print(f"Probability of reaching desired result (binomial): {data.prob_binomial*100:.2f}%")
             print(f"95% CI: [{data.prob_binomial_lower_95*100:.2f}%, {data.prob_binomial_higher_95*100:.2f}%]")
             print(f"50% CI: [{data.prob_binomial_lower_50*100:.2f}%, {data.prob_binomial_higher_50*100:.2f}%]")
+
+    def do_compare(args):
+        """Usage: compare <fileA.xlsx> <fileB.xlsx>"""
+        if len(args) < 2:
+            print("Usage: compare <A.xlsx> <B.xlsx>")
+            return
+        fileA, fileB = args[0], args[1]
+        dsA = ShotsData()
+        dsB = ShotsData()
+        try:
+            dsA.import_from_excel(fileA)
+            dsA.calculate_metrics()
+            dsB.import_from_excel(fileB)
+            dsB.calculate_metrics()
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            return
+        
+        # now compare
+        try:
+            frac = compare_datasets(dsA, dsB, n_boot=10000, mc_size=10000)
+            print(f"Probability dataset A is better than B: {frac*100:.2f}%")
+        except Exception as e:
+            print(f"Comparison error: {e}")
 
     do_help()
     while True:
@@ -889,8 +1082,11 @@ def cli_mode():
             do_calc()
         elif cmd == 'metrics':
             do_metrics()
+        elif cmd == 'compare':
+            do_compare(args)
         else:
             print(f"Unknown command: {cmd}. Type 'help' for a list.")
+
 
 ###############################################################################
 # 4) main(): Decide whether to run the GUI or CLI based on arguments
@@ -903,7 +1099,7 @@ def main():
     
     if args.gui:
         root = tk.Tk()
-        root.state('zoomed')
+        root.state('zoomed')  # Optional: make the window maximized
         app = ShotAccuracyApp(root)
         root.mainloop()
     else:
