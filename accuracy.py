@@ -233,13 +233,9 @@ def compare_datasets(dataA, dataB, n_boot=10000, mc_size=10000):
     Compare two ShotsData-like objects (dataA, dataB),
     returning the probability that A has a higher 'hit probability'
     than B by parametric bootstrap.
-
-    For each dataset:
-       - We resample (parametric) the means/stdevs
-       - Then do a short Monte Carlo to estimate p(hit)
-    We count how many times pA > pB.
     """
-    # Check each dataset has at least 2 shots => std dev available
+
+    # Check each dataset has at least 2 shots => std dev
     if dataA.stdX_dev is None or dataA.stdY_dev is None:
         raise ValueError("Dataset A does not have enough shots for stdev (need >= 2).")
     if dataB.stdX_dev is None or dataB.stdY_dev is None:
@@ -357,12 +353,13 @@ class ShotAccuracyApp:
         self.compare_tab = tk.Frame(self.notebook)
         self.notebook.add(self.compare_tab, text="Compare Datasets")
 
-        self.compare_dataA = None
-        self.compare_dataB = None
+        # We'll store two ShotsData objects
+        self.compare_dataA = ShotsData(radius=15.0)
+        self.compare_dataB = ShotsData(radius=15.0)
         self.build_compare_ui(self.compare_tab)
 
     # ----------------------------------------------------------------
-    # MAIN TAB (exactly your original approach) 
+    # MAIN TAB
     # ----------------------------------------------------------------
     def create_shot_entries(self):
         columns = ('#1', '#2')
@@ -829,34 +826,43 @@ class ShotAccuracyApp:
     # ----------------------------------------------------------------
 
     def build_compare_ui(self, parent):
-        """Sets up the tab that allows comparing two data sets."""
-        tk.Label(parent, text="Dataset A:").grid(row=0, column=0, sticky='e', padx=5, pady=5)
+        """Sets up the tab that allows comparing two data sets, each with their own radius."""
+        # Radius entries for A and B
+        tk.Label(parent, text="Radius for A:").grid(row=0, column=0, padx=5, pady=5, sticky='e')
+        self.radiusA_var = tk.StringVar(value="15.0")
+        radiusA_entry = tk.Entry(parent, textvariable=self.radiusA_var, width=10)
+        radiusA_entry.grid(row=0, column=1, padx=5, pady=5, sticky='w')
+
+        tk.Label(parent, text="Dataset A file:").grid(row=0, column=2, padx=5, pady=5, sticky='e')
         self.labelA = tk.Label(parent, text="(no file loaded)")
-        self.labelA.grid(row=0, column=1, sticky='w', padx=5, pady=5)
-        tk.Button(parent, text="Load A", command=self.on_load_A).grid(row=0, column=2, padx=5, pady=5)
+        self.labelA.grid(row=0, column=3, sticky='w', padx=5, pady=5)
+        tk.Button(parent, text="Load A", command=self.on_load_A).grid(row=0, column=4, padx=5, pady=5)
 
-        tk.Label(parent, text="Dataset B:").grid(row=1, column=0, sticky='e', padx=5, pady=5)
+        tk.Label(parent, text="Radius for B:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
+        self.radiusB_var = tk.StringVar(value="15.0")
+        radiusB_entry = tk.Entry(parent, textvariable=self.radiusB_var, width=10)
+        radiusB_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
+
+        tk.Label(parent, text="Dataset B file:").grid(row=1, column=2, padx=5, pady=5, sticky='e')
         self.labelB = tk.Label(parent, text="(no file loaded)")
-        self.labelB.grid(row=1, column=1, sticky='w', padx=5, pady=5)
-        tk.Button(parent, text="Load B", command=self.on_load_B).grid(row=1, column=2, padx=5, pady=5)
+        self.labelB.grid(row=1, column=3, sticky='w', padx=5, pady=5)
+        tk.Button(parent, text="Load B", command=self.on_load_B).grid(row=1, column=4, padx=5, pady=5)
 
-        tk.Button(parent, text="Compare", command=self.on_compare).grid(row=2, column=0, columnspan=3, pady=10)
+        tk.Button(parent, text="Compare", command=self.on_compare).grid(row=2, column=0, columnspan=5, pady=10)
 
         self.compare_result_label = tk.Label(parent, text="Probability A > B: N/A")
-        self.compare_result_label.grid(row=3, column=0, columnspan=3, padx=10, pady=10)
+        self.compare_result_label.grid(row=3, column=0, columnspan=5, padx=10, pady=10)
 
     def on_load_A(self):
         path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
         if not path:
             return
-        dsA = ShotsData()
         try:
-            dsA.import_from_excel(path)
-            dsA.calculate_metrics()
+            self.compare_dataA.import_from_excel(path)
+            self.compare_dataA.calculate_metrics()
             # require at least 2 shots
-            if dsA.stdX_dev is None or dsA.stdY_dev is None:
+            if self.compare_dataA.stdX_dev is None or self.compare_dataA.stdY_dev is None:
                 raise ValueError("Not enough shots to compute stdev in dataset A.")
-            self.compare_dataA = dsA
             self.labelA.config(text=path)
         except Exception as e:
             messagebox.showerror("Error loading A", str(e))
@@ -865,21 +871,30 @@ class ShotAccuracyApp:
         path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
         if not path:
             return
-        dsB = ShotsData()
         try:
-            dsB.import_from_excel(path)
-            dsB.calculate_metrics()
-            if dsB.stdX_dev is None or dsB.stdY_dev is None:
+            self.compare_dataB.import_from_excel(path)
+            self.compare_dataB.calculate_metrics()
+            if self.compare_dataB.stdX_dev is None or self.compare_dataB.stdY_dev is None:
                 raise ValueError("Not enough shots to compute stdev in dataset B.")
-            self.compare_dataB = dsB
             self.labelB.config(text=path)
         except Exception as e:
             messagebox.showerror("Error loading B", str(e))
 
     def on_compare(self):
-        if not self.compare_dataA or not self.compare_dataB:
+        # Set each dataset's radius from the user entry
+        try:
+            rA = float(self.radiusA_var.get())
+            rB = float(self.radiusB_var.get())
+            self.compare_dataA.set_radius(rA)
+            self.compare_dataB.set_radius(rB)
+        except ValueError:
+            messagebox.showerror("Radius Error", "Radius must be numeric and > 0.")
+            return
+
+        if not self.compare_dataA.shots or not self.compare_dataB.shots:
             messagebox.showwarning("Missing data", "Please load both dataset A and B first.")
             return
+
         try:
             frac = compare_datasets(self.compare_dataA, self.compare_dataB,
                                     n_boot=10000, mc_size=10000)
@@ -899,19 +914,19 @@ def cli_mode():
 
     def do_help():
         print("Available commands:")
-        print("  help                     Show this help")
-        print("  list                     Show all shots")
-        print("  add <x> <y>             Add a shot")
-        print("  remove <index>          Remove a shot by its index (from 'list')")
-        print("  import <file.xlsx>      Import from Excel")
-        print("  export <file.xlsx>      Export to Excel")
-        print("  set radius <value>      Set radius (cm)")
-        print("  set trials <N>          Set number of trials")
-        print("  set hits <N>            Set number of hits")
-        print("  calc                    Calculate all metrics & probabilities")
-        print("  metrics                 Print out the latest metrics")
-        print("  compare <A.xlsx> <B.xlsx>  Compare two data sets (A > B?)")
-        print("  exit                    Quit the program")
+        print("  help                       Show this help")
+        print("  list                       Show all shots")
+        print("  add <x> <y>               Add a shot")
+        print("  remove <index>            Remove a shot by its index (from 'list')")
+        print("  import <file.xlsx>        Import from Excel")
+        print("  export <file.xlsx>        Export to Excel")
+        print("  set radius <value>        Set radius (cm)")
+        print("  set trials <N>            Set number of trials")
+        print("  set hits <N>              Set number of hits")
+        print("  calc                      Calculate all metrics & probabilities")
+        print("  metrics                   Print out the latest metrics")
+        print("  compare <A.xlsx> <B.xlsx> [rA] [rB]   Compare two datasets with optional radii")
+        print("  exit                      Quit the program")
 
     def do_list():
         shots = data.list_shots()
@@ -1026,17 +1041,41 @@ def cli_mode():
             print(f"50% CI: [{data.prob_binomial_lower_50*100:.2f}%, {data.prob_binomial_higher_50*100:.2f}%]")
 
     def do_compare(args):
-        """Usage: compare <fileA.xlsx> <fileB.xlsx>"""
+        """
+        Usage: compare <fileA.xlsx> <fileB.xlsx> [rA] [rB]
+
+        If rA/rB not provided, defaults to 15.
+        """
         if len(args) < 2:
-            print("Usage: compare <A.xlsx> <B.xlsx>")
+            print("Usage: compare <A.xlsx> <B.xlsx> [rA] [rB]")
             return
-        fileA, fileB = args[0], args[1]
+
+        fileA = args[0]
+        fileB = args[1]
+        radiusA = 15.0
+        radiusB = 15.0
+        if len(args) >= 3:
+            try:
+                radiusA = float(args[2])
+            except ValueError:
+                print("Invalid radiusA.")
+                return
+        if len(args) >= 4:
+            try:
+                radiusB = float(args[3])
+            except ValueError:
+                print("Invalid radiusB.")
+                return
+        
         dsA = ShotsData()
         dsB = ShotsData()
         try:
             dsA.import_from_excel(fileA)
+            dsA.set_radius(radiusA)
             dsA.calculate_metrics()
+
             dsB.import_from_excel(fileB)
+            dsB.set_radius(radiusB)
             dsB.calculate_metrics()
         except Exception as e:
             print(f"Error loading data: {e}")
@@ -1045,7 +1084,7 @@ def cli_mode():
         # now compare
         try:
             frac = compare_datasets(dsA, dsB, n_boot=10000, mc_size=10000)
-            print(f"Probability dataset A is better than B: {frac*100:.2f}%")
+            print(f"Probability dataset A (radius={radiusA}) is better than B (radius={radiusB}): {frac*100:.2f}%")
         except Exception as e:
             print(f"Comparison error: {e}")
 
@@ -1099,7 +1138,7 @@ def main():
     
     if args.gui:
         root = tk.Tk()
-        root.state('zoomed')  # Optional: make the window maximized
+        root.state('zoomed')  # Optional: make window maximized
         app = ShotAccuracyApp(root)
         root.mainloop()
     else:
