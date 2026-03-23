@@ -4,7 +4,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from math import sqrt
 from statistics import mean, stdev
-from scipy.stats import norm, chi2, binom
+from scipy.stats import norm, chi2, binom, shapiro, ttest_1samp
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
@@ -33,6 +33,12 @@ class ShotsData:
         self.stdY_error = None
         self.total_shots = 0
         
+        # Gaussianity scores (Shapiro-Wilk)
+        self.gaussianity_x_w = None
+        self.gaussianity_x_p = None
+        self.gaussianity_y_w = None
+        self.gaussianity_y_p = None
+
         # Probability inputs
         self.trials = None
         self.hits = None
@@ -104,6 +110,10 @@ class ShotsData:
             self.Y_mean = None
             self.stdX_error = None
             self.stdY_error = None
+            self.gaussianity_x_w = None
+            self.gaussianity_x_p = None
+            self.gaussianity_y_w = None
+            self.gaussianity_y_p = None
             self.total_shots = 0
             return
         
@@ -137,6 +147,74 @@ class ShotsData:
             self.Y_mean = avg_y
             self.stdX_error = None
             self.stdY_error = None
+
+        # Gaussianity (Shapiro-Wilk requires 3+ samples)
+        if len(self.shots) >= 3:
+            self.gaussianity_x_w, self.gaussianity_x_p = shapiro(x_vals)
+            self.gaussianity_y_w, self.gaussianity_y_p = shapiro(y_vals)
+        else:
+            self.gaussianity_x_w = None
+            self.gaussianity_x_p = None
+            self.gaussianity_y_w = None
+            self.gaussianity_y_p = None
+
+    def compute_metric_pvalues(self, n_boot=2000):
+        """Compute p-values and bootstrap standard errors for all metrics.
+
+        Returns a dict with keys like 'mean_x_p', 'stdX_se', 'rms_x_se', etc.
+        For means: t-test p-value (H0: mean = 0, i.e. no systematic bias).
+        For all others: bootstrap standard error.
+        """
+        result = {}
+        if len(self.shots) < 2:
+            return result
+
+        x_arr = np.array([s[0] for s in self.shots])
+        y_arr = np.array([s[1] for s in self.shots])
+        n = len(self.shots)
+
+        # T-test p-values for mean X and mean Y (H0: mean = 0)
+        _, result['mean_x_p'] = ttest_1samp(x_arr, 0.0)
+        _, result['mean_y_p'] = ttest_1samp(y_arr, 0.0)
+
+        if n < 3:
+            return result
+
+        # Bootstrap standard errors for all other metrics
+        shots_arr = np.array(self.shots)
+        boot_metrics = {k: [] for k in [
+            'stdX', 'stdY', 'rms_x', 'rms_y', 'rms_radial',
+            'range_x_50', 'range_y_50', 'cep_50', 'cep_95',
+            'avg_abs_x', 'avg_abs_y', 'cep_100',
+            'range_x_100', 'range_y_100',
+        ]}
+
+        for _ in range(n_boot):
+            idx = np.random.randint(0, n, size=n)
+            bx = shots_arr[idx, 0]
+            by = shots_arr[idx, 1]
+            bmx, bmy = bx.mean(), by.mean()
+            bdists = np.sqrt((bx - bmx)**2 + (by - bmy)**2)
+
+            boot_metrics['stdX'].append(bx.std(ddof=1))
+            boot_metrics['stdY'].append(by.std(ddof=1))
+            boot_metrics['rms_x'].append(np.sqrt(np.mean((bx - bmx)**2)))
+            boot_metrics['rms_y'].append(np.sqrt(np.mean((by - bmy)**2)))
+            boot_metrics['rms_radial'].append(np.sqrt(np.mean(bdists**2)))
+            boot_metrics['range_x_50'].append(2 * np.percentile(np.abs(bx - bmx), 50))
+            boot_metrics['range_y_50'].append(2 * np.percentile(np.abs(by - bmy), 50))
+            boot_metrics['cep_50'].append(np.percentile(bdists, 50))
+            boot_metrics['cep_95'].append(np.percentile(bdists, 95))
+            boot_metrics['avg_abs_x'].append(np.mean(np.abs(bx - bmx)))
+            boot_metrics['avg_abs_y'].append(np.mean(np.abs(by - bmy)))
+            boot_metrics['cep_100'].append(bdists.max())
+            boot_metrics['range_x_100'].append(bx.max() - bx.min())
+            boot_metrics['range_y_100'].append(by.max() - by.min())
+
+        for key, vals in boot_metrics.items():
+            result[f'{key}_se'] = np.std(vals)
+
+        return result
 
     def reset_probability_results(self):
         self.prob_hit_one_shot = None
@@ -309,7 +387,16 @@ class ShotAccuracyApp:
         self.master = master
         master.title("Shot Accuracy Calculator")
         master.geometry("1600x800")
-        
+
+        # Set default font to something thicker and bigger
+        import tkinter.font as tkfont
+        default_font = tkfont.nametofont("TkDefaultFont")
+        default_font.configure(family="DejaVu Sans", size=11, weight="bold")
+        master.option_add("*Font", default_font)
+
+        # Store background color for selectable labels
+        self._label_bg = master.cget('bg')
+
         # Create a Notebook for multiple tabs
         self.notebook = ttk.Notebook(master)
         self.notebook.pack(fill='both', expand=True)
@@ -321,6 +408,7 @@ class ShotAccuracyApp:
         self.notebook.add(self.main_tab, text="Main Calculator")
 
         self.data = ShotsData(radius=15.0)
+        self.metric_pvalues = {}
 
         # Tkinter Variables
         self.trials_var = tk.StringVar()
@@ -399,52 +487,78 @@ class ShotAccuracyApp:
         self.radius_entry = tk.Entry(self.controls_frame, textvariable=self.radius_var, width=10)
         self.radius_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
-        # Metrics
-        self.avg_label = tk.Label(self.metrics_frame, text="Average Coordinates: N/A")
-        self.avg_label.grid(row=0, column=0, sticky='w', padx=10)
-
-        self.accuracy_label = tk.Label(self.metrics_frame, 
-                                       text=f"Accuracy (within {self.data.valid_radius}cm): N/A")
-        self.accuracy_label.grid(row=1, column=0, sticky='w', padx=10)
-
-        self.stdX_label = tk.Label(self.metrics_frame, text="Standard Deviation X: N/A")
-        self.stdX_label.grid(row=2, column=0, sticky='w', padx=10)
-
-        self.stdY_label = tk.Label(self.metrics_frame, text="Standard Deviation Y: N/A")
-        self.stdY_label.grid(row=3, column=0, sticky='w', padx=10)
-
-        self.rms_x_label = tk.Label(self.metrics_frame, text="RMS X: N/A")
-        self.rms_x_label.grid(row=4, column=0, sticky='w', padx=10)
-
-        self.rms_y_label = tk.Label(self.metrics_frame, text="RMS Y: N/A")
-        self.rms_y_label.grid(row=5, column=0, sticky='w', padx=10)
-
-        self.rms_radial_label = tk.Label(self.metrics_frame, text="RMS Radial: N/A")
-        self.rms_radial_label.grid(row=6, column=0, sticky='w', padx=10)
-
-        self.range_x_50_label = tk.Label(self.metrics_frame, text="50% X Range: N/A")
-        self.range_x_50_label.grid(row=7, column=0, sticky='w', padx=10)
-
-        self.range_y_50_label = tk.Label(self.metrics_frame, text="50% Y Range: N/A")
-        self.range_y_50_label.grid(row=8, column=0, sticky='w', padx=10)
-
-        self.cep_50_label = tk.Label(self.metrics_frame, text="CEP50 (radius): N/A")
-        self.cep_50_label.grid(row=9, column=0, sticky='w', padx=10)
-
-        self.cumulative_x_error_label = tk.Label(self.metrics_frame, text="Average absolute X: N/A")
-        self.cumulative_x_error_label.grid(row=10, column=0, sticky='w', padx=10)
-
-        self.cumulative_y_error_label = tk.Label(self.metrics_frame, text="Average absolute Y: N/A")
-        self.cumulative_y_error_label.grid(row=11, column=0, sticky='w', padx=10)
-
-        self.cep_100_label = tk.Label(self.metrics_frame, text="CEP100 (radius): N/A")
-        self.cep_100_label.grid(row=12, column=0, sticky='w', padx=10)
-
-        self.range_x_100_label = tk.Label(self.metrics_frame, text="100% X Range: N/A")
-        self.range_x_100_label.grid(row=13, column=0, sticky='w', padx=10)
-
-        self.range_y_100_label = tk.Label(self.metrics_frame, text="100% Y Range: N/A")
-        self.range_y_100_label.grid(row=14, column=0, sticky='w', padx=10)
+        # Metrics (selectable labels) — column 0: values, column 1: p-values / ± SE
+        self.avg_label = self._selectable_label(self.metrics_frame, "Average Coordinates: N/A",
+                                                row=0, column=0, sticky='w', padx=10)
+        self.avg_p_label = self._selectable_label(self.metrics_frame, "",
+                                                  row=0, column=1, sticky='w', padx=10)
+        self.accuracy_label = self._selectable_label(self.metrics_frame,
+                                                     f"Accuracy (within {self.data.valid_radius}cm): N/A",
+                                                     row=1, column=0, sticky='w', padx=10)
+        self.stdX_label = self._selectable_label(self.metrics_frame, "Standard Deviation X: N/A",
+                                                 row=2, column=0, sticky='w', padx=10)
+        self.stdX_p_label = self._selectable_label(self.metrics_frame, "",
+                                                   row=2, column=1, sticky='w', padx=10)
+        self.stdY_label = self._selectable_label(self.metrics_frame, "Standard Deviation Y: N/A",
+                                                 row=3, column=0, sticky='w', padx=10)
+        self.stdY_p_label = self._selectable_label(self.metrics_frame, "",
+                                                   row=3, column=1, sticky='w', padx=10)
+        self.rms_x_label = self._selectable_label(self.metrics_frame, "RMS X: N/A",
+                                                  row=4, column=0, sticky='w', padx=10)
+        self.rms_x_p_label = self._selectable_label(self.metrics_frame, "",
+                                                    row=4, column=1, sticky='w', padx=10)
+        self.rms_y_label = self._selectable_label(self.metrics_frame, "RMS Y: N/A",
+                                                  row=5, column=0, sticky='w', padx=10)
+        self.rms_y_p_label = self._selectable_label(self.metrics_frame, "",
+                                                    row=5, column=1, sticky='w', padx=10)
+        self.rms_radial_label = self._selectable_label(self.metrics_frame, "RMS Radial: N/A",
+                                                       row=6, column=0, sticky='w', padx=10)
+        self.rms_radial_p_label = self._selectable_label(self.metrics_frame, "",
+                                                         row=6, column=1, sticky='w', padx=10)
+        self.range_x_50_label = self._selectable_label(self.metrics_frame, "50% X Range: N/A",
+                                                       row=7, column=0, sticky='w', padx=10)
+        self.range_x_50_p_label = self._selectable_label(self.metrics_frame, "",
+                                                         row=7, column=1, sticky='w', padx=10)
+        self.range_y_50_label = self._selectable_label(self.metrics_frame, "50% Y Range: N/A",
+                                                       row=8, column=0, sticky='w', padx=10)
+        self.range_y_50_p_label = self._selectable_label(self.metrics_frame, "",
+                                                         row=8, column=1, sticky='w', padx=10)
+        self.cep_50_label = self._selectable_label(self.metrics_frame, "CEP50 (radius): N/A",
+                                                   row=9, column=0, sticky='w', padx=10)
+        self.cep_50_p_label = self._selectable_label(self.metrics_frame, "",
+                                                     row=9, column=1, sticky='w', padx=10)
+        self.cumulative_x_error_label = self._selectable_label(self.metrics_frame, "Average absolute X: N/A",
+                                                               row=10, column=0, sticky='w', padx=10)
+        self.avg_abs_x_p_label = self._selectable_label(self.metrics_frame, "",
+                                                        row=10, column=1, sticky='w', padx=10)
+        self.cumulative_y_error_label = self._selectable_label(self.metrics_frame, "Average absolute Y: N/A",
+                                                               row=11, column=0, sticky='w', padx=10)
+        self.avg_abs_y_p_label = self._selectable_label(self.metrics_frame, "",
+                                                        row=11, column=1, sticky='w', padx=10)
+        self.cep_95_label = self._selectable_label(self.metrics_frame, "CEP95 (radius): N/A",
+                                                   row=12, column=0, sticky='w', padx=10)
+        self.cep_95_p_label = self._selectable_label(self.metrics_frame, "",
+                                                     row=12, column=1, sticky='w', padx=10)
+        self.cep_100_label = self._selectable_label(self.metrics_frame, "CEP100 (radius): N/A",
+                                                    row=13, column=0, sticky='w', padx=10)
+        self.cep_100_p_label = self._selectable_label(self.metrics_frame, "",
+                                                      row=13, column=1, sticky='w', padx=10)
+        self.range_x_100_label = self._selectable_label(self.metrics_frame, "100% X Range: N/A",
+                                                        row=14, column=0, sticky='w', padx=10)
+        self.range_x_100_p_label = self._selectable_label(self.metrics_frame, "",
+                                                          row=14, column=1, sticky='w', padx=10)
+        self.range_y_100_label = self._selectable_label(self.metrics_frame, "100% Y Range: N/A",
+                                                        row=15, column=0, sticky='w', padx=10)
+        self.range_y_100_p_label = self._selectable_label(self.metrics_frame, "",
+                                                          row=15, column=1, sticky='w', padx=10)
+        self.gauss_x_label = self._selectable_label(self.metrics_frame, "Gaussianity X: N/A",
+                                                    row=16, column=0, sticky='w', padx=10)
+        self.gauss_x_p_label = self._selectable_label(self.metrics_frame, "",
+                                                      row=16, column=1, sticky='w', padx=10)
+        self.gauss_y_label = self._selectable_label(self.metrics_frame, "Gaussianity Y: N/A",
+                                                    row=17, column=0, sticky='w', padx=10)
+        self.gauss_y_p_label = self._selectable_label(self.metrics_frame, "",
+                                                      row=17, column=1, sticky='w', padx=10)
 
         # Probability area
         self.trials_label = tk.Label(self.prob_frame, text="Number of Trials:")
@@ -457,28 +571,38 @@ class ShotAccuracyApp:
         self.hits_entry = tk.Entry(self.prob_frame, textvariable=self.hits_var)
         self.hits_entry.grid(row=1, column=1, padx=5, pady=5, sticky='w')
 
-        self.prob_xy_label = tk.Label(self.prob_frame, text="Probability of one shot hitting: N/A")
-        self.prob_xy_label.grid(row=6, column=0, columnspan=2, sticky='w', padx=10)
-
-        self.prob_binomial_label = tk.Label(self.prob_frame, text="Probability of reaching desired result: N/A")
-        self.prob_binomial_label.grid(row=7, column=0, columnspan=2, sticky='w', padx=10)
-
-        self.prob_lower_label = tk.Label(self.prob_frame, text="Lower Probability (95% confidence): N/A")
-        self.prob_lower_label.grid(row=8, column=0, columnspan=2, sticky='w', padx=10)
-
-        self.prob_higher_label = tk.Label(self.prob_frame, text="Higher Probability (95% confidence): N/A")
-        self.prob_higher_label.grid(row=9, column=0, columnspan=2, sticky='w', padx=10)
-
-        self.prob_lower_50_label = tk.Label(self.prob_frame, text="Lower Probability (50% confidence): N/A")
-        self.prob_lower_50_label.grid(row=10, column=0, columnspan=2, sticky='w', padx=10)
-
-        self.prob_higher_50_label = tk.Label(self.prob_frame, text="Higher Probability (50% confidence): N/A")
-        self.prob_higher_50_label.grid(row=11, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_xy_label = self._selectable_label(self.prob_frame, "Probability of one shot hitting: N/A",
+                                                    row=6, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_binomial_label = self._selectable_label(self.prob_frame, "Probability of reaching desired result: N/A",
+                                                          row=7, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_lower_label = self._selectable_label(self.prob_frame, "Lower Probability (95% confidence): N/A",
+                                                       row=8, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_higher_label = self._selectable_label(self.prob_frame, "Higher Probability (95% confidence): N/A",
+                                                        row=9, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_lower_50_label = self._selectable_label(self.prob_frame, "Lower Probability (50% confidence): N/A",
+                                                          row=10, column=0, columnspan=2, sticky='w', padx=10)
+        self.prob_higher_50_label = self._selectable_label(self.prob_frame, "Higher Probability (50% confidence): N/A",
+                                                           row=11, column=0, columnspan=2, sticky='w', padx=10)
 
         # Event bindings
         self.trials_var.trace_add('write', self.on_prob_input_change)
         self.hits_var.trace_add('write', self.on_prob_input_change)
         self.radius_var.trace_add('write', self.on_radius_change)
+
+    def _selectable_label(self, parent, text, **grid_kwargs):
+        """Create a read-only Entry widget that looks like a label but allows text selection."""
+        var = tk.StringVar(value=text)
+        entry = tk.Entry(parent, textvariable=var, state='readonly',
+                         readonlybackground=self._label_bg, relief='flat',
+                         borderwidth=0, highlightthickness=0, width=60)
+        entry.grid(**grid_kwargs)
+        entry._var = var  # keep reference for updates
+        return entry
+
+    @staticmethod
+    def _set_label_text(entry, text):
+        """Update text of a selectable label."""
+        entry._var.set(text)
 
     def on_shot_change(self, event):
         # Rebuild shots from the tree
@@ -568,123 +692,188 @@ class ShotAccuracyApp:
     def update_metrics_and_visualization(self):
         self.data.calculate_metrics()
         self.data.calculate_probabilities()
+        self.metric_pvalues = self.data.compute_metric_pvalues()
         self.update_metric_labels()
         self.update_visualization()
 
+    def _fmt_se(self, key):
+        """Format a bootstrap SE value from self.metric_pvalues, or return ''."""
+        pv = getattr(self, 'metric_pvalues', {})
+        se = pv.get(f'{key}_se')
+        if se is not None:
+            return f"\u00b1 {se:.2f} cm"
+        return ""
+
+    def _fmt_p(self, key):
+        """Format a p-value from self.metric_pvalues, or return ''."""
+        pv = getattr(self, 'metric_pvalues', {})
+        p = pv.get(f'{key}_p')
+        if p is not None:
+            return f"p = {p:.4f}"
+        return ""
+
+    def _clear_p_labels(self):
+        """Clear all second-column p-value/SE labels."""
+        _s = self._set_label_text
+        for lbl in [
+            self.avg_p_label, self.stdX_p_label, self.stdY_p_label,
+            self.rms_x_p_label, self.rms_y_p_label, self.rms_radial_p_label,
+            self.range_x_50_p_label, self.range_y_50_p_label,
+            self.cep_50_p_label, self.avg_abs_x_p_label, self.avg_abs_y_p_label,
+            self.cep_95_p_label, self.cep_100_p_label,
+            self.range_x_100_p_label, self.range_y_100_p_label,
+            self.gauss_x_p_label, self.gauss_y_p_label,
+        ]:
+            _s(lbl, "")
+
     def update_metric_labels(self):
+        _s = self._set_label_text
         if not self.data.shots:
             # Clear everything
-            self.avg_label.config(text="Average Coordinates: N/A")
-            self.accuracy_label.config(text=f"Accuracy (within {self.data.valid_radius}cm): N/A")
-            self.stdX_label.config(text="Standard Deviation X: N/A")
-            self.stdY_label.config(text="Standard Deviation Y: N/A")
-            self.rms_x_label.config(text="RMS X: N/A")
-            self.rms_y_label.config(text="RMS Y: N/A")
-            self.rms_radial_label.config(text="RMS Radial: N/A")
-            self.range_x_50_label.config(text="50% X Range: N/A")
-            self.range_y_50_label.config(text="50% Y Range: N/A")
-            self.cep_50_label.config(text="CEP50 (radius): N/A")
-            self.cumulative_x_error_label.config(text="Average absolute X: N/A")
-            self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
-            self.cep_100_label.config(text="CEP100 (radius): N/A")
-            self.range_x_100_label.config(text="100% X Range: N/A")
-            self.range_y_100_label.config(text="100% Y Range: N/A")
+            _s(self.avg_label, "Average Coordinates: N/A")
+            _s(self.accuracy_label, f"Accuracy (within {self.data.valid_radius}cm): N/A")
+            _s(self.stdX_label, "Standard Deviation X: N/A")
+            _s(self.stdY_label, "Standard Deviation Y: N/A")
+            _s(self.rms_x_label, "RMS X: N/A")
+            _s(self.rms_y_label, "RMS Y: N/A")
+            _s(self.rms_radial_label, "RMS Radial: N/A")
+            _s(self.range_x_50_label, "50% X Range: N/A")
+            _s(self.range_y_50_label, "50% Y Range: N/A")
+            _s(self.cep_50_label, "CEP50 (radius): N/A")
+            _s(self.cumulative_x_error_label, "Average absolute X: N/A")
+            _s(self.cumulative_y_error_label, "Average absolute Y: N/A")
+            _s(self.cep_95_label, "CEP95 (radius): N/A")
+            _s(self.cep_100_label, "CEP100 (radius): N/A")
+            _s(self.range_x_100_label, "100% X Range: N/A")
+            _s(self.range_y_100_label, "100% Y Range: N/A")
+            _s(self.gauss_x_label, "Gaussianity X: N/A")
+            _s(self.gauss_y_label, "Gaussianity Y: N/A")
+            self._clear_p_labels()
             return
-        
+
         # Basic
         avg_x, avg_y = self.data.avg_coords
-        self.avg_label.config(text=f"Average Coordinates: ({avg_x:.2f}, {avg_y:.2f}) cm")
+        _s(self.avg_label, f"Average Coordinates: ({avg_x:.2f}, {avg_y:.2f}) cm")
+        # p-value for mean: t-test H0: mean_x=0, mean_y=0 (bias test)
+        mean_x_p = self._fmt_p('mean_x')
+        mean_y_p = self._fmt_p('mean_y')
+        if mean_x_p and mean_y_p:
+            _s(self.avg_p_label, f"bias: X {mean_x_p}, Y {mean_y_p}")
+        else:
+            _s(self.avg_p_label, "")
+
         within_radius = self.data.accuracy
         total = self.data.total_shots
-        self.accuracy_label.config(
-            text=f"Accuracy (within {self.data.valid_radius}cm): {within_radius} / {total}"
-        )
-        
+        _s(self.accuracy_label, f"Accuracy (within {self.data.valid_radius}cm): {within_radius} / {total}")
+
         if self.data.stdX_dev is not None:
-            self.stdX_label.config(text=f"Standard Deviation X: {self.data.stdX_dev:.2f} cm")
-            self.stdY_label.config(text=f"Standard Deviation Y: {self.data.stdY_dev:.2f} cm")
+            _s(self.stdX_label, f"Standard Deviation X: {self.data.stdX_dev:.2f} cm")
+            _s(self.stdY_label, f"Standard Deviation Y: {self.data.stdY_dev:.2f} cm")
+            _s(self.stdX_p_label, self._fmt_se('stdX'))
+            _s(self.stdY_p_label, self._fmt_se('stdY'))
         else:
-            self.stdX_label.config(text="Standard Deviation X: N/A")
-            self.stdY_label.config(text="Standard Deviation Y: N/A")
-        
+            _s(self.stdX_label, "Standard Deviation X: N/A")
+            _s(self.stdY_label, "Standard Deviation Y: N/A")
+            _s(self.stdX_p_label, "")
+            _s(self.stdY_p_label, "")
+
         # If 2+ shots, we can do extra stats
         distances = self.data.distances
         if len(distances) > 1:
             x_vals = [s[0] for s in self.data.shots]
             y_vals = [s[1] for s in self.data.shots]
 
-            # RMS X
+            # RMS
             rms_x = np.sqrt(np.mean((np.array(x_vals) - avg_x)**2))
             rms_y = np.sqrt(np.mean((np.array(y_vals) - avg_y)**2))
             rms_radial = np.sqrt(np.mean(np.array(distances)**2))
-            self.rms_x_label.config(text=f"RMS X: {rms_x:.2f} cm")
-            self.rms_y_label.config(text=f"RMS Y: {rms_y:.2f} cm")
-            self.rms_radial_label.config(text=f"RMS Radial: {rms_radial:.2f} cm")
-            
+            _s(self.rms_x_label, f"RMS X: {rms_x:.2f} cm")
+            _s(self.rms_y_label, f"RMS Y: {rms_y:.2f} cm")
+            _s(self.rms_radial_label, f"RMS Radial: {rms_radial:.2f} cm")
+            _s(self.rms_x_p_label, self._fmt_se('rms_x'))
+            _s(self.rms_y_p_label, self._fmt_se('rms_y'))
+            _s(self.rms_radial_p_label, self._fmt_se('rms_radial'))
+
             x_50_range = 2 * np.percentile(np.abs(np.array(x_vals) - avg_x), 50)
             y_50_range = 2 * np.percentile(np.abs(np.array(y_vals) - avg_y), 50)
-            self.range_x_50_label.config(text=f"50% X Range: {x_50_range:.2f} cm")
-            self.range_y_50_label.config(text=f"50% Y Range: {y_50_range:.2f} cm")
-            
+            _s(self.range_x_50_label, f"50% X Range: {x_50_range:.2f} cm")
+            _s(self.range_y_50_label, f"50% Y Range: {y_50_range:.2f} cm")
+            _s(self.range_x_50_p_label, self._fmt_se('range_x_50'))
+            _s(self.range_y_50_p_label, self._fmt_se('range_y_50'))
+
             cep_50 = np.percentile(distances, 50)
-            self.cep_50_label.config(text=f"CEP50 (radius): {cep_50:.2f} cm")
-            
+            _s(self.cep_50_label, f"CEP50 (radius): {cep_50:.2f} cm")
+            _s(self.cep_50_p_label, self._fmt_se('cep_50'))
+
             cum_x_error = float(np.sum(np.abs(np.array(x_vals) - avg_x)))
             cum_y_error = float(np.sum(np.abs(np.array(y_vals) - avg_y)))
             n = len(distances)
-            self.cumulative_x_error_label.config(text=f"Average absolute X: {cum_x_error/n:.2f} cm")
-            self.cumulative_y_error_label.config(text=f"Average absolute Y: {cum_y_error/n:.2f} cm")
-            
+            _s(self.cumulative_x_error_label, f"Average absolute X: {cum_x_error/n:.2f} cm")
+            _s(self.cumulative_y_error_label, f"Average absolute Y: {cum_y_error/n:.2f} cm")
+            _s(self.avg_abs_x_p_label, self._fmt_se('avg_abs_x'))
+            _s(self.avg_abs_y_p_label, self._fmt_se('avg_abs_y'))
+
+            cep_95 = np.percentile(distances, 95)
+            _s(self.cep_95_label, f"CEP95 (radius): {cep_95:.2f} cm")
+            _s(self.cep_95_p_label, self._fmt_se('cep_95'))
+
             cep_100 = max(distances)
             range_x_100 = max(x_vals) - min(x_vals)
             range_y_100 = max(y_vals) - min(y_vals)
-            self.cep_100_label.config(text=f"CEP100 (radius): {cep_100:.2f} cm")
-            self.range_x_100_label.config(text=f"100% X Range: {range_x_100:.2f} cm")
-            self.range_y_100_label.config(text=f"100% Y Range: {range_y_100:.2f} cm")
+            _s(self.cep_100_label, f"CEP100 (radius): {cep_100:.2f} cm")
+            _s(self.range_x_100_label, f"100% X Range: {range_x_100:.2f} cm")
+            _s(self.range_y_100_label, f"100% Y Range: {range_y_100:.2f} cm")
+            _s(self.cep_100_p_label, self._fmt_se('cep_100'))
+            _s(self.range_x_100_p_label, self._fmt_se('range_x_100'))
+            _s(self.range_y_100_p_label, self._fmt_se('range_y_100'))
+
+            # Gaussianity (Shapiro-Wilk W statistic; 1.0 = perfect Gaussian)
+            if self.data.gaussianity_x_w is not None:
+                _s(self.gauss_x_label, f"Gaussianity X: W={self.data.gaussianity_x_w:.4f}")
+                _s(self.gauss_y_label, f"Gaussianity Y: W={self.data.gaussianity_y_w:.4f}")
+                _s(self.gauss_x_p_label, f"p = {self.data.gaussianity_x_p:.4f}")
+                _s(self.gauss_y_p_label, f"p = {self.data.gaussianity_y_p:.4f}")
+            else:
+                _s(self.gauss_x_label, "Gaussianity X: N/A (need 3+ shots)")
+                _s(self.gauss_y_label, "Gaussianity Y: N/A (need 3+ shots)")
+                _s(self.gauss_x_p_label, "")
+                _s(self.gauss_y_p_label, "")
         else:
             # If only 1 shot
-            self.rms_x_label.config(text="RMS X: N/A")
-            self.rms_y_label.config(text="RMS Y: N/A")
-            self.rms_radial_label.config(text="RMS Radial: N/A")
-            self.range_x_50_label.config(text="50% X Range: N/A")
-            self.range_y_50_label.config(text="50% Y Range: N/A")
-            self.cep_50_label.config(text="CEP50 (radius): N/A")
-            self.cumulative_x_error_label.config(text="Average absolute X: N/A")
-            self.cumulative_y_error_label.config(text="Average absolute Y: N/A")
-            self.cep_100_label.config(text="CEP100 (radius): N/A")
-            self.range_x_100_label.config(text="100% X Range: N/A")
-            self.range_y_100_label.config(text="100% Y Range: N/A")
-        
+            _s(self.rms_x_label, "RMS X: N/A")
+            _s(self.rms_y_label, "RMS Y: N/A")
+            _s(self.rms_radial_label, "RMS Radial: N/A")
+            _s(self.range_x_50_label, "50% X Range: N/A")
+            _s(self.range_y_50_label, "50% Y Range: N/A")
+            _s(self.cep_50_label, "CEP50 (radius): N/A")
+            _s(self.cumulative_x_error_label, "Average absolute X: N/A")
+            _s(self.cumulative_y_error_label, "Average absolute Y: N/A")
+            _s(self.cep_95_label, "CEP95 (radius): N/A")
+            _s(self.cep_100_label, "CEP100 (radius): N/A")
+            _s(self.range_x_100_label, "100% X Range: N/A")
+            _s(self.range_y_100_label, "100% Y Range: N/A")
+            _s(self.gauss_x_label, "Gaussianity X: N/A")
+            _s(self.gauss_y_label, "Gaussianity Y: N/A")
+            self._clear_p_labels()
+
         # Probability
         if self.data.prob_hit_one_shot is not None:
-            self.prob_xy_label.config(
-                text=f"Probability of one shot hitting: {self.data.prob_hit_one_shot * 100:.2f}%"
-            )
+            _s(self.prob_xy_label, f"Probability of one shot hitting: {self.data.prob_hit_one_shot * 100:.2f}%")
         else:
-            self.prob_xy_label.config(text="Probability of one shot hitting: N/A")
-        
+            _s(self.prob_xy_label, "Probability of one shot hitting: N/A")
+
         if self.data.prob_binomial is not None:
-            self.prob_binomial_label.config(
-                text=f"Probability of reaching desired result: {self.data.prob_binomial * 100:.2f}%"
-            )
-            self.prob_lower_label.config(
-                text=f"Lower Probability (95% confidence): {self.data.prob_binomial_lower_95 * 100:.2f}%"
-            )
-            self.prob_higher_label.config(
-                text=f"Higher Probability (95% confidence): {self.data.prob_binomial_higher_95 * 100:.2f}%"
-            )
-            self.prob_lower_50_label.config(
-                text=f"Lower Probability (50% confidence): {self.data.prob_binomial_lower_50 * 100:.2f}%"
-            )
-            self.prob_higher_50_label.config(
-                text=f"Higher Probability (50% confidence): {self.data.prob_binomial_higher_50 * 100:.2f}%"
-            )
+            _s(self.prob_binomial_label, f"Probability of reaching desired result: {self.data.prob_binomial * 100:.2f}%")
+            _s(self.prob_lower_label, f"Lower Probability (95% confidence): {self.data.prob_binomial_lower_95 * 100:.2f}%")
+            _s(self.prob_higher_label, f"Higher Probability (95% confidence): {self.data.prob_binomial_higher_95 * 100:.2f}%")
+            _s(self.prob_lower_50_label, f"Lower Probability (50% confidence): {self.data.prob_binomial_lower_50 * 100:.2f}%")
+            _s(self.prob_higher_50_label, f"Higher Probability (50% confidence): {self.data.prob_binomial_higher_50 * 100:.2f}%")
         else:
-            self.prob_binomial_label.config(text="Probability of reaching desired result: N/A")
-            self.prob_lower_label.config(text="Lower Probability (95% confidence): N/A")
-            self.prob_higher_label.config(text="Higher Probability (95% confidence): N/A")
-            self.prob_lower_50_label.config(text="Lower Probability (50% confidence): N/A")
-            self.prob_higher_50_label.config(text="Higher Probability (50% confidence): N/A")
+            _s(self.prob_binomial_label, "Probability of reaching desired result: N/A")
+            _s(self.prob_lower_label, "Lower Probability (95% confidence): N/A")
+            _s(self.prob_higher_label, "Higher Probability (95% confidence): N/A")
+            _s(self.prob_lower_50_label, "Lower Probability (50% confidence): N/A")
+            _s(self.prob_higher_50_label, "Higher Probability (50% confidence): N/A")
 
     def on_radius_change(self, *args):
         try:
@@ -788,35 +977,37 @@ class ShotAccuracyApp:
             x_vals = [s[0] for s in shots]
             y_vals = [s[1] for s in shots]
 
-            kde_x = gaussian_kde(x_vals, bw_method='scott')
-            x_range = np.linspace(min(x_vals) - 10, max(x_vals) + 10, 1000)
-            y_kde_x = kde_x(x_range)
-            self.ax_density_x.plot(x_range, y_kde_x, color='blue', lw=2)
-            self.ax_density_x.fill_between(x_range, y_kde_x, color='skyblue', alpha=0.5)
-            self.ax_density_x.set_title('X Coordinate Density')
-            self.ax_density_x.set_xlabel('X (cm)')
-            self.ax_density_x.set_ylabel('Density')
-            self.ax_density_x.grid(True)
+            # Plot X density (skip KDE if all values identical)
+            if len(set(x_vals)) > 1:
+                kde_x = gaussian_kde(x_vals, bw_method='scott')
+                x_range = np.linspace(min(x_vals) - 10, max(x_vals) + 10, 1000)
+                y_kde_x = kde_x(x_range)
+                self.ax_density_x.plot(x_range, y_kde_x, color='blue', lw=2)
+                self.ax_density_x.fill_between(x_range, y_kde_x, color='skyblue', alpha=0.5)
+            else:
+                self.ax_density_x.axvline(x_vals[0], color='blue', lw=2, label=f'x = {x_vals[0]:.2f}')
+                self.ax_density_x.legend()
 
-            kde_y = gaussian_kde(y_vals, bw_method='scott')
-            y_range = np.linspace(min(y_vals) - 10, max(y_vals) + 10, 1000)
-            y_kde_y = kde_y(y_range)
-            self.ax_density_y.plot(y_range, y_kde_y, color='blue', lw=2)
-            self.ax_density_y.fill_between(y_range, y_kde_y, color='skyblue', alpha=0.5)
-            self.ax_density_y.set_title('Y Coordinate Density')
-            self.ax_density_y.set_xlabel('Y (cm)')
-            self.ax_density_y.set_ylabel('Density')
-            self.ax_density_y.grid(True)
-        else:
-            self.ax_density_x.set_title('X Coordinate Density')
-            self.ax_density_x.set_xlabel('X (cm)')
-            self.ax_density_x.set_ylabel('Density')
-            self.ax_density_x.grid(True)
+            # Plot Y density (skip KDE if all values identical)
+            if len(set(y_vals)) > 1:
+                kde_y = gaussian_kde(y_vals, bw_method='scott')
+                y_range = np.linspace(min(y_vals) - 10, max(y_vals) + 10, 1000)
+                y_kde_y = kde_y(y_range)
+                self.ax_density_y.plot(y_range, y_kde_y, color='blue', lw=2)
+                self.ax_density_y.fill_between(y_range, y_kde_y, color='skyblue', alpha=0.5)
+            else:
+                self.ax_density_y.axvline(y_vals[0], color='blue', lw=2, label=f'y = {y_vals[0]:.2f}')
+                self.ax_density_y.legend()
 
-            self.ax_density_y.set_title('Y Coordinate Density')
-            self.ax_density_y.set_xlabel('Y (cm)')
-            self.ax_density_y.set_ylabel('Density')
-            self.ax_density_y.grid(True)
+        self.ax_density_x.set_title('X Coordinate Density')
+        self.ax_density_x.set_xlabel('X (cm)')
+        self.ax_density_x.set_ylabel('Density')
+        self.ax_density_x.grid(True)
+
+        self.ax_density_y.set_title('Y Coordinate Density')
+        self.ax_density_y.set_xlabel('Y (cm)')
+        self.ax_density_y.set_ylabel('Density')
+        self.ax_density_y.grid(True)
 
         self.fig_density.tight_layout()
         self.canvas_density.draw()
@@ -850,8 +1041,8 @@ class ShotAccuracyApp:
 
         tk.Button(parent, text="Compare", command=self.on_compare).grid(row=2, column=0, columnspan=5, pady=10)
 
-        self.compare_result_label = tk.Label(parent, text="Probability A > B: N/A")
-        self.compare_result_label.grid(row=3, column=0, columnspan=5, padx=10, pady=10)
+        self.compare_result_label = self._selectable_label(parent, "Probability A > B: N/A",
+                                                              row=3, column=0, columnspan=5, padx=10, pady=10)
 
     def on_load_A(self):
         path = filedialog.askopenfilename(filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
@@ -899,7 +1090,7 @@ class ShotAccuracyApp:
             frac = compare_datasets(self.compare_dataA, self.compare_dataB,
                                     n_boot=10000, mc_size=10000)
             pct = frac * 100
-            self.compare_result_label.config(text=f"Probability A > B: {pct:.2f}%")
+            self._set_label_text(self.compare_result_label, f"Probability A > B: {pct:.2f}%")
         except Exception as e:
             messagebox.showerror("Comparison Error", str(e))
 
@@ -1133,16 +1324,16 @@ def cli_mode():
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--gui", action="store_true", help="Run the GUI instead of CLI")
+    parser.add_argument("--cli", action="store_true", help="Run in CLI mode instead of GUI")
     args = parser.parse_args()
-    
-    if args.gui:
+
+    if args.cli:
+        cli_mode()
+    else:
         root = tk.Tk()
-        root.state('zoomed')  # Optional: make window maximized
+        root.attributes('-zoomed', True)  # Optional: make window maximized
         app = ShotAccuracyApp(root)
         root.mainloop()
-    else:
-        cli_mode()
 
 if __name__ == "__main__":
     main()
